@@ -22,7 +22,7 @@ var viewOnlyKeys = map[string]bool{
 	"pgup": true, "pgdown": true, "ctrl+u": true, "ctrl+d": true, "ctrl+f": true, "ctrl+b": true,
 	"home": true, "end": true, "g": true, "G": true,
 	"1": true, "2": true, "3": true, "4": true, "5": true, "6": true, "7": true, "8": true, "9": true,
-	"0": true, "%": true, "!": true, "@": true, "#": true, "&": true,
+	"0": true, "%": true, "!": true, "@": true, "#": true, "&": true, "[": true, "]": true,
 	"q": true, "ctrl+c": true,
 }
 
@@ -96,7 +96,7 @@ func (h *Home) viewOnlyAllowsMouse(msg tea.MouseMsg) bool {
 func (h *Home) renderViewOnlyHelpBar() string {
 	border := lipgloss.NewStyle().Foreground(ColorBorder).Render(strings.Repeat("─", max(0, h.width)))
 	label := lipgloss.NewStyle().Foreground(ColorAccent).Bold(true).Render("VIEW ONLY")
-	hint := lipgloss.NewStyle().Foreground(ColorComment).Render("  ↑↓ move · ←→ fold · % filter · q quit")
+	hint := lipgloss.NewStyle().Foreground(ColorComment).Render("  ↑↓ move · ←→ fold · [ ] filter · q quit")
 	content := " " + label + hint
 	return lipgloss.NewStyle().MaxWidth(h.width).Render(lipgloss.JoinVertical(lipgloss.Left, border, content))
 }

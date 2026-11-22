@@ -2812,6 +2812,7 @@ func (h *Home) renderFilterBarHint() []string {
 			mark("#", h.statusFilter == session.StatusIdle) +
 			mark(FilterKeyError, h.statusFilter == session.StatusError) +
 			dim.Render(" filter"),
+		mark("[", false) + mark("]", false) + dim.Render(" cycle"),
 		mark("0", h.statusFilter == "") + dim.Render(" all"),
 		mark(FilterKeyActive, h.statusFilter == FilterModeActive) + dim.Render(" open"),
 		mark(FilterKeyArchived, h.statusFilter == FilterModeArchived) + dim.Render(" archived"),

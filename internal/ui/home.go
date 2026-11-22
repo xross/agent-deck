@@ -7271,6 +7271,13 @@ func (h *Home) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Clear status filter (show all)
 		return h, h.changeStatusFilter("")
 
+	case "]", "[":
+		// Step through the status filters (status_filter_cycle.go).
+		if key == "]" {
+			return h, h.cycleStatusFilter(1)
+		}
+		return h, h.cycleStatusFilter(-1)
+
 	case "!", "shift+1":
 		// Filter to running sessions only
 		return h, h.changeStatusFilter(session.StatusRunning)

@@ -473,6 +473,23 @@ func TestHeaderCounts_OpenGroupsOnly(t *testing.T) {
 	}
 }
 
+// ] steps forward through the status filters and [ back, wrapping round.
+func TestCycleStatusFilter(t *testing.T) {
+	h := NewHome()
+	h.storage = nil
+	want := []session.Status{FilterModeActive, session.StatusRunning, session.StatusWaiting, session.StatusIdle, session.StatusStopped, session.StatusError, ""}
+	for _, w := range want {
+		h.cycleStatusFilter(1)
+		if h.statusFilter != w {
+			t.Fatalf("] gave %q, want %q", h.statusFilter, w)
+		}
+	}
+	h.cycleStatusFilter(-1)
+	if h.statusFilter != session.StatusError {
+		t.Fatalf("[ from all gave %q, want error", h.statusFilter)
+	}
+}
+
 func TestDarkenTowardBg(t *testing.T) {
 	InitTheme("dark")
 	got := darkenTowardBg(lipgloss.Color("#ffffff"), 0.5)
