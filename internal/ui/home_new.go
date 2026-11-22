@@ -204,6 +204,7 @@ func NewHomeWithProfileAndMode(profile string) *Home {
 		deadLetterPanel:           NewDeadLetterPanel(),
 		todosPanel:                NewTodosPanel(actualProfile),
 		triggersFeed:              stateDBTriggersFeed{},
+		modelBadgeFeed:            stateDBModelBadgeFeed{},
 		voiceReader:               voicestate.NewReader(voicestate.DefaultDir()),
 		toolVisibilityPanel:       NewToolVisibilityPanel(),
 		insertBatchDuration:       defaultInsertBatchDuration,
@@ -285,6 +286,7 @@ func NewHomeWithProfileAndMode(profile string) *Home {
 		session.ConfigureTmuxDisplay(cfg.Display)
 		h.showSessionTimestamps = cfg.Display.ShowSessionTimestamps
 		h.showPaneTitles = cfg.Display.ShowPaneTitles
+		h.showSessionModel = cfg.Display.ShowSessionModel
 		h.sysStatsConfig = cfg.SystemStats
 		h.costLineTemplate, h.costLineHideWhenZero = session.ResolveCostLineTemplate(cfg, actualProfile)
 		h.previewPct = cfg.UI.GetPreviewPct()

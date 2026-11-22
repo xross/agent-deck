@@ -170,3 +170,51 @@ func (s *StateDB) ClaudeStatuslineForSession(target string) (*ClaudeStatusline, 
 	}
 	return &record, nil
 }
+
+// ClaudeStatuslineModels returns the model each Claude session last reported
+// through its status line, keyed by agent-deck session ID. It joins on the
+// session's current native ID, as ClaudeStatuslineForSession does, and skips a
+// native ID that more than one session claims. A session with no record, or a
+// record without a model, is absent.
+func (s *StateDB) ClaudeStatuslineModels() (map[string]ClaudeStatuslineModel, error) {
+	toolCond, toolArgs := ClaudeToolPredicate()
+	rows, err := s.db.Query(`SELECT i.id, s.claude_session_id, s.record FROM instances i
+  JOIN claude_statuslines s ON s.claude_session_id = json_extract(i.tool_data, '$.claude_session_id')
+  WHERE i.`+toolCond, toolArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type owned struct {
+		sessionID string
+		model     ClaudeStatuslineModel
+		hasModel  bool
+	}
+	byNative := make(map[string][]owned)
+	for rows.Next() {
+		var sessionID, nativeID string
+		var raw []byte
+		if err := rows.Scan(&sessionID, &nativeID, &raw); err != nil {
+			return nil, err
+		}
+		var record ClaudeStatusline
+		if err := json.Unmarshal(raw, &record); err != nil {
+			continue
+		}
+		entry := owned{sessionID: sessionID}
+		if record.Model != nil && (record.Model.ID != "" || record.Model.DisplayName != "") {
+			entry.model, entry.hasModel = *record.Model, true
+		}
+		byNative[nativeID] = append(byNative[nativeID], entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make(map[string]ClaudeStatuslineModel, len(byNative))
+	for _, owners := range byNative {
+		if len(owners) == 1 && owners[0].hasModel {
+			out[owners[0].sessionID] = owners[0].model
+		}
+	}
+	return out, nil
+}

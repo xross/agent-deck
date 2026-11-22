@@ -108,3 +108,43 @@ func TestClaudeStatuslineCustomClaudeTool(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "s1", owner)
 }
+
+// TestClaudeStatuslineModels pins the sidebar model badge's source: each
+// session maps to the model its status line last reported, and a session
+// with no record, no model, or a native ID shared with another session is
+// absent.
+func TestClaudeStatuslineModels(t *testing.T) {
+	db := newTestDB(t)
+	for id, native := range map[string]string{
+		"opus": "n-opus", "switched": "n-switched", "silent": "n-silent",
+		"nomodel": "n-nomodel", "dup-a": "n-dup", "dup-b": "n-dup",
+	} {
+		require.NoError(t, db.SaveInstance(&InstanceRow{ID: id, Title: id, Tool: "claude",
+			ToolData: json.RawMessage(fmt.Sprintf(`{"claude_session_id":%q}`, native))}))
+	}
+	require.NoError(t, db.SaveInstance(&InstanceRow{ID: "shell", Title: "shell", Tool: "shell",
+		ToolData: json.RawMessage(`{"claude_session_id":"n-shell"}`)}))
+	save := func(native, model string) {
+		t.Helper()
+		record := ClaudeStatusline{ClaudeSessionID: native}
+		if model != "" {
+			record.Model = &ClaudeStatuslineModel{ID: model}
+		}
+		_, err := db.SaveClaudeStatusline(record)
+		require.NoError(t, err)
+	}
+	save("n-opus", "claude-opus-5-5")
+	save("n-switched", "claude-opus-5-5")
+	save("n-switched", "claude-fable-5-2") // a /model switch replaces the record
+	save("n-nomodel", "")
+	save("n-dup", "claude-opus-5-5")
+	save("n-shell", "claude-opus-5-5")
+	save("n-unlinked", "claude-opus-5-5")
+
+	models, err := db.ClaudeStatuslineModels()
+	require.NoError(t, err)
+	require.Equal(t, map[string]ClaudeStatuslineModel{
+		"opus":     {ID: "claude-opus-5-5"},
+		"switched": {ID: "claude-fable-5-2"},
+	}, models)
+}

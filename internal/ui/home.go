@@ -316,6 +316,13 @@ type Home struct {
 	triggersRev      string
 	triggersKey      string
 	triggersPollGen  int
+	// Model row badge (model_badge.go): liveModels is the last poll of the
+	// models Claude sessions reported through their status line; modelLabels
+	// is the per-session row label resolved from it and the launch model.
+	modelBadgeFeed    modelBadgeFeed
+	liveModels        map[string]string
+	modelLabels       map[string]string
+	modelBadgePollGen int
 	// Voice mic badge (voice_badge.go): the reader stats ~/.claude/voice on
 	// the tick; rows render from voiceState only. voiceNow is the clock the
 	// badge words use (nil = time.Now).
@@ -746,6 +753,11 @@ type Home struct {
 	// description) suffix on every session row instead of only the selected
 	// one. Cached here so all rows of a frame agree; reloaded after panel save.
 	showPaneTitles bool
+
+	// showSessionModel, when true, renders each session's current model as a
+	// "[model]" badge on its row (model_badge.go). Default false. Loaded from
+	// config.Display.ShowSessionModel.
+	showSessionModel bool
 
 	// accountSlotsConfigured mirrors len(session.ConfiguredAccountNames(cfg)) > 0,
 	// the same gate the New/Edit Session dialogs use to hide their account rows
@@ -2662,6 +2674,11 @@ func (h *Home) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			h.instancesMu.Unlock()
+			// Model row badges resolve against the session list, so re-read
+			// them now instead of waiting out a tick (model_badge.go).
+			if cmd := h.restartModelBadgePoll(); cmd != nil {
+				detectionCmds = append(detectionCmds, cmd)
+			}
 			if firstLoad {
 				// Seed the MRU ring from persisted last_accessed (#2058) once,
 				// on the process's first load — a later reload (ctrl+r) or
@@ -3979,6 +3996,9 @@ func (h *Home) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case triggersTickMsg, triggersPolledMsg:
 		return h, h.handleTriggersMsg(msg)
 
+	case modelBadgeTickMsg, modelBadgePolledMsg:
+		return h, h.handleModelBadgeMsg(msg)
+
 	case reviverTickMsg:
 		// Fire-and-forget reviver sweep for instances whose tmux server
 		// survived an SSH scope cleanup but whose pipe was reaped. Runs in
@@ -5149,6 +5169,7 @@ func (h *Home) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 				h.reloadHotkeysFromConfig()
 				h.showSessionTimestamps = config.Display.ShowSessionTimestamps
 				h.showPaneTitles = config.Display.ShowPaneTitles
+				h.showSessionModel = config.Display.ShowSessionModel
 				h.hiddenToolBadge = hiddenToolBadgeFor(config)
 				h.setAccountSlotsConfigured(len(session.ConfiguredAccountNames(config)) > 0)
 				h.applySavedLayoutSettings(config.UI)
@@ -8754,9 +8775,20 @@ func (h *Home) renderSessionItem(
 		triggersBudget = max(0, badgeBudget-viewersWidth)
 	}
 	triggersBadgeText, triggersWidth := fitTriggersBadge(h.triggerBadges[inst.ID], selected, triggersBudget)
+	// Model badge (model_badge.go): the session's current model. It sits next
+	// to the tool badge and is dropped with it on a narrow list; otherwise it
+	// is fitted after the triggers badge and before the account badge.
+	modelBudget := badgeBudget
+	if badgeBudget >= 0 {
+		modelBudget = max(0, badgeBudget-viewersWidth-triggersWidth)
+	}
+	modelBadgeText, modelWidth := "", 0
+	if listWidth <= 0 || listWidth >= 40 {
+		modelBadgeText, modelWidth = fitModelBadge(h.sessionModelLabel(inst), selected, modelBudget)
+	}
 	accountBudget := instState.accountDisplay.width
 	if badgeBudget >= 0 {
-		accountBudget = min(accountBudget, badgeBudget-viewersWidth-triggersWidth)
+		accountBudget = min(accountBudget, badgeBudget-viewersWidth-triggersWidth-modelWidth)
 	}
 	accountBadge, accountWidth := instState.accountDisplay.fit(accountBudget)
 	if accountBadge != "" {
@@ -8769,23 +8801,23 @@ func (h *Home) renderSessionItem(
 	if voiceWidth > 0 {
 		wordsBudget := -1
 		if listWidth > 0 {
-			wordsBudget = max(0, listWidth-reserved-cellWidth(displayTitle)-viewersWidth-triggersWidth-accountWidth-1)
+			wordsBudget = max(0, listWidth-reserved-cellWidth(displayTitle)-viewersWidth-triggersWidth-modelWidth-accountWidth-1)
 		}
 		voiceBadgeText, voiceWidth = fitVoiceBadge(voiceState, selected, -1, wordsBudget, h.voiceClock())
 	}
 	if listWidth > 0 {
-		budget := max(0, listWidth-reserved-voiceWidth-viewersWidth-triggersWidth-accountWidth-1)
+		budget := max(0, listWidth-reserved-voiceWidth-viewersWidth-triggersWidth-modelWidth-accountWidth-1)
 		if cellWidth(displayTitle) > budget {
 			displayTitle = cellTruncate(displayTitle, budget, "…")
 		}
 	}
 	title := titleStyle.Render(displayTitle)
 
-	// Build row: [gutter][baseIndent][selection][tree][chevron][status] [title] [voice] [tool] [badges]
+	// Build row: [gutter][baseIndent][selection][tree][chevron][status] [title] [voice] [tool] [model] [badges]
 	// The leading gutter (leftGutterWidth) keeps sessions aligned with group
 	// rows, which reserve the same gutter for root hotkey numbers.
 	row := fmt.Sprintf(
-		"%s%s%s%s%s%s %s%s%s%s%s%s%s%s%s%s%s%s%s%s%s",
+		"%s%s%s%s%s%s %s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s",
 		strings.Repeat(" ", leftGutterWidth),
 		baseIndent,
 		selectionPrefix,
@@ -8795,6 +8827,7 @@ func (h *Home) renderSessionItem(
 		title,
 		voiceBadgeText,
 		tool,
+		modelBadgeText,
 		maestroBadge,
 		yoloBadge,
 		worktreeBadge,

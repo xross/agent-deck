@@ -4496,6 +4496,14 @@ type DisplaySettings struct {
 	// every session row, not just the selected one. Default: false — opt-in to
 	// avoid crowding narrow sidebars. See renderSessionItem for the source.
 	ShowPaneTitles bool `toml:"show_pane_titles,omitempty"`
+
+	// ShowSessionModel appends a model badge (e.g. "[opus 5.5]") to every
+	// session row. A Claude session shows the model its status line last
+	// reported and an OpenCode session the model in OpenCode's own store, so
+	// a model switch inside the tool is reflected; other sessions show the
+	// model they were launched with, and a session with none shows no badge.
+	// Valid values: true, false. Default: false.
+	ShowSessionModel bool `toml:"show_session_model,omitempty"`
 }
 
 // GetActiveFilterExcludes returns the resolved set of statuses the % filter
