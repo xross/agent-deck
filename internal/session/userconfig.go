@@ -123,6 +123,23 @@ type UserConfig struct {
 	// Empty or unrecognized values normalize to "creation".
 	GroupSort string `toml:"group_sort,omitempty"`
 
+	// GroupOrder controls the order of the groups themselves; sessions inside
+	// a group follow GroupSort. Valid values:
+	//   "manual"     (default) — the stored order, as set by K/J and
+	//                            `group reorder`.
+	//   "actionable"           — sibling groups are ordered by their most
+	//                            actionable session (error, waiting, running,
+	//                            idle, stopped; then most recently used),
+	//                            counting sessions in subgroups. The stored
+	//                            order is kept as the tie-breaker and is not
+	//                            rewritten.
+	//   "recent"               — sibling groups are ordered by their most
+	//                            recently active session, whatever its
+	//                            status: the later of its last agent
+	//                            activity and its last use from the deck.
+	// Empty or unrecognized values normalize to "manual".
+	GroupOrder string `toml:"group_order,omitempty"`
+
 	// SendTransport selects how `agent-deck session send` delivers to a
 	// Claude-compatible target. "tmux" (default) pins the historical keystroke
 	// path; "auto" opts in to Claude Code's messaging socket when one is
@@ -2405,6 +2422,16 @@ func (c *UserConfig) GetGroupSort() string {
 	return "creation"
 }
 
+// GetGroupOrder returns the normalized group order mode: "actionable" or
+// "recent" only when explicitly set, otherwise "manual" (the default).
+func (c *UserConfig) GetGroupOrder() string {
+	switch c.GroupOrder {
+	case "actionable", "recent":
+		return c.GroupOrder
+	}
+	return "manual"
+}
+
 // GetSendTransport returns the normalized send transport: "auto" only when
 // explicitly set to it, otherwise "tmux" (the default). The socket transport
 // is opt-in, so this is fail-closed, unlike GetGroupSort: an empty value and
@@ -4677,6 +4704,7 @@ func LoadUserConfig() (*UserConfig, error) {
 		userConfigCache = &fresh
 		userConfigCacheMtime = time.Time{}
 		SetGroupSortMode(fresh.GetGroupSort())
+		SetGroupOrderMode(fresh.GetGroupOrder())
 		userConfigCacheErr = nil
 		return userConfigCache, nil
 	}
@@ -4687,6 +4715,7 @@ func LoadUserConfig() (*UserConfig, error) {
 		userConfigCache = &fresh
 		userConfigCacheMtime = time.Time{}
 		SetGroupSortMode(fresh.GetGroupSort())
+		SetGroupOrderMode(fresh.GetGroupOrder())
 		userConfigCacheErr = nil
 		return userConfigCache, nil
 	}
@@ -4704,6 +4733,7 @@ func LoadUserConfig() (*UserConfig, error) {
 		userConfigCache = &fresh
 		userConfigCacheMtime = currentMtime
 		SetGroupSortMode(fresh.GetGroupSort())
+		SetGroupOrderMode(fresh.GetGroupOrder())
 		userConfigCacheErr = fmt.Errorf("config.toml parse error: %w", err)
 		return userConfigCache, userConfigCacheErr
 	}
@@ -4731,6 +4761,7 @@ func LoadUserConfig() (*UserConfig, error) {
 	// the single funnel for TUI, web, and CLI; ReloadUserConfig routes through
 	// here too, so an external edit to group_sort takes effect on next load.
 	SetGroupSortMode(config.GetGroupSort())
+	SetGroupOrderMode(config.GetGroupOrder())
 
 	userConfigCache = &config
 	userConfigCacheMtime = currentMtime

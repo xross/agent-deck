@@ -475,6 +475,85 @@ func NewGroupTreeWithGroups(instances []*Instance, storedGroups []*GroupData) *G
 
 // Note: GroupData is defined in storage.go in the same package
 
+// groupOrderMode caches the active group order mode ("manual", "actionable"
+// or "recent"), refreshed from LoadUserConfig like groupSortMode.
+var groupOrderMode atomic.Value // holds string
+
+// SetGroupOrderMode updates the cached group order mode. Any value other
+// than "actionable" or "recent" normalizes to "manual".
+func SetGroupOrderMode(mode string) {
+	if mode != "actionable" && mode != "recent" {
+		mode = "manual"
+	}
+	groupOrderMode.Store(mode)
+}
+
+func currentGroupOrderMode() string {
+	if v, ok := groupOrderMode.Load().(string); ok && v != "" {
+		return v
+	}
+	return "manual"
+}
+
+// groupRank is a group's place among its siblings under an automatic
+// group_order, taken from its best session, subgroups included. Under
+// "actionable" that is the session's status bucket, then when it was last
+// used; under "recent" every session shares one bucket and only the time of
+// its last activity counts.
+type groupRank struct {
+	priority int
+	accessed time.Time
+}
+
+// emptyGroupPriority sorts a group with no sessions after every status bucket.
+const emptyGroupPriority = 6
+
+func (r groupRank) before(o groupRank) bool {
+	if r.priority != o.priority {
+		return r.priority < o.priority
+	}
+	return r.accessed.After(o.accessed)
+}
+
+// sessionLastActive is when a session last did anything or was last opened:
+// the later of its recorded agent activity and its last use from the deck,
+// falling back to when it was created.
+func sessionLastActive(inst *Instance) time.Time {
+	latest := inst.CreatedAt
+	for _, ts := range []time.Time{inst.LastActivityAt(), inst.GetLastAccessedAtThreadSafe()} {
+		if ts.After(latest) {
+			latest = ts
+		}
+	}
+	return latest
+}
+
+// groupRanks ranks every group by its best session, folding each group's
+// rank into all of its ancestors so a parent surfaces with its busiest child.
+func (t *GroupTree) groupRanks(mode string) map[string]groupRank {
+	ranks := make(map[string]groupRank, len(t.Groups))
+	for path := range t.Groups {
+		ranks[path] = groupRank{priority: emptyGroupPriority}
+	}
+	for path, g := range t.Groups {
+		for _, inst := range g.Sessions {
+			r := groupRank{priority: actionablePriority(inst.Status), accessed: inst.GetLastAccessedAtThreadSafe()}
+			if mode == "recent" {
+				r = groupRank{accessed: sessionLastActive(inst)}
+			}
+			for p := path; ; p = getParentPath(p) {
+				if cur, ok := ranks[p]; ok && r.before(cur) {
+					ranks[p] = r
+				}
+				if !strings.Contains(p, "/") {
+					break
+				}
+			}
+		}
+	}
+	return ranks
+}
+
 // rebuildGroupList rebuilds the ordered group list
 func (t *GroupTree) rebuildGroupList() {
 	t.GroupList = make([]*Group, 0, len(t.Groups))
@@ -495,6 +574,28 @@ func (t *GroupTree) rebuildGroupList() {
 		}
 		t.GroupList = append(t.GroupList, g)
 	}
+	// siblingLess orders two sibling groups: by Order then Name, and under
+	// an automatic group_order ("actionable", "recent") by rank first. Pinned groups (negative
+	// Order: conductor, Maestro) keep their place above the rest either way.
+	var ranks map[string]groupRank
+	if mode := currentGroupOrderMode(); mode != "manual" {
+		ranks = t.groupRanks(mode)
+	}
+	siblingLess := func(a, b *Group) bool {
+		if ranks != nil && a.Order >= 0 && b.Order >= 0 {
+			ra, rb := ranks[a.Path], ranks[b.Path]
+			if ra.before(rb) {
+				return true
+			}
+			if rb.before(ra) {
+				return false
+			}
+		}
+		if a.Order != b.Order {
+			return a.Order < b.Order
+		}
+		return a.Name < b.Name
+	}
 	sort.Slice(t.GroupList, func(i, j int) bool {
 		// Sort hierarchically: parents before children, siblings by order
 		pathI := t.GroupList[i].Path
@@ -514,10 +615,7 @@ func (t *GroupTree) rebuildGroupList() {
 
 		// If they have the same parent, sort by order then name
 		if parentI == parentJ {
-			if t.GroupList[i].Order != t.GroupList[j].Order {
-				return t.GroupList[i].Order < t.GroupList[j].Order
-			}
-			return t.GroupList[i].Name < t.GroupList[j].Name
+			return siblingLess(t.GroupList[i], t.GroupList[j])
 		}
 
 		// Different parents - compare at root level to keep tree structure
@@ -549,10 +647,7 @@ func (t *GroupTree) rebuildGroupList() {
 			branchJ := t.Groups[branchPathJ]
 
 			if branchI != nil && branchJ != nil {
-				if branchI.Order != branchJ.Order {
-					return branchI.Order < branchJ.Order
-				}
-				return branchI.Name < branchJ.Name
+				return siblingLess(branchI, branchJ)
 			}
 
 			// Fallback to path comparison if branches not found
@@ -564,10 +659,7 @@ func (t *GroupTree) rebuildGroupList() {
 		rootGroupI := t.Groups[rootI]
 		rootGroupJ := t.Groups[rootJ]
 		if rootGroupI != nil && rootGroupJ != nil {
-			if rootGroupI.Order != rootGroupJ.Order {
-				return rootGroupI.Order < rootGroupJ.Order
-			}
-			return rootGroupI.Name < rootGroupJ.Name
+			return siblingLess(rootGroupI, rootGroupJ)
 		}
 
 		// Fallback to full path comparison if root groups not found
