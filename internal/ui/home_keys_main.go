@@ -23,6 +23,10 @@ func (h *Home) collapseOrNavUp() {
 	}
 	item := h.flatItems[h.cursor]
 	collapsed := false
+	if h.foldSummary(item) {
+		// The session's summary lines fold to one line first.
+		return
+	}
 	if item.Type == session.ItemTypeGroup {
 		groupPath := item.Path
 		h.groupTree.CollapseGroup(groupPath)

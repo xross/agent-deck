@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/asheshgoplani/agent-deck/internal/session"
 )
@@ -242,8 +243,11 @@ func TestSessionSummary_Lines(t *testing.T) {
 			t.Errorf("line %d = %q, want only %q", i+1, lines[i+1], want)
 		}
 	}
-	if got := strings.Index(lines[1], "prompt:"); got != strings.Index(lines[0], "General") {
-		t.Errorf("summary lines must align with the title: prompt at %d, title at %d", got, strings.Index(lines[0], "General"))
+	if got := strings.Index(lines[1], "│ prompt:"); got != strings.Index(lines[0], "General") {
+		t.Errorf("summary lines must start under the title: connector at %d, title at %d", got, strings.Index(lines[0], "General"))
+	}
+	if !strings.Contains(lines[3], "╰ doing:") || strings.Contains(lines[2], "╰") {
+		t.Errorf("only the last summary line ends the connector: %q", lines[1:])
 	}
 
 	h.sessionRenderSnapshot.Store(map[string]sessionRenderState{inst.ID: state})
@@ -295,5 +299,83 @@ func TestSessionSummary_ReplyTruncated(t *testing.T) {
 	s := h.sessionSummaryFor(inst, sessionRenderState{status: session.StatusIdle, tool: "claude", title: "General"})
 	if cellWidth(s.step) > summaryReplyWidth || !strings.HasSuffix(s.step, "…") {
 		t.Fatalf("reply = %q (%d cells), want at most %d ending in …", s.step, cellWidth(s.step), summaryReplyWidth)
+	}
+}
+
+// Left folds a session's summary lines to one line and right opens them, as
+// for a group; folded, the row is one line tall again.
+func TestSessionSummary_Fold(t *testing.T) {
+	inst := &session.Instance{ID: "cl", Title: "General", Tool: "claude"}
+	h := &Home{width: 200, summaryLines: true, showPaneTitles: true, liveReplies: map[string]string{"cl": "Both changes are in."}}
+	state := sessionRenderState{status: session.StatusIdle, tool: "claude", title: "General", latestPrompt: "fix the build"}
+	h.sessionRenderSnapshot.Store(map[string]sessionRenderState{inst.ID: state})
+	item := session.Item{Type: session.ItemTypeSession, Session: inst, Level: 1, Path: "test", IsLastInGroup: true}
+
+	if got := h.sidebarItemRenderHeightAtWidthLines(item, 200, 1); got != 3 {
+		t.Fatalf("open row height = %d, want 3", got)
+	}
+	if !h.foldSummary(item) {
+		t.Fatal("left on an open summary must fold it")
+	}
+	if got := h.sidebarItemRenderHeightAtWidthLines(item, 200, 1); got != 1 {
+		t.Fatalf("folded row height = %d, want 1", got)
+	}
+	state.paneTitle = "General task"
+	row := summaryRow(t, h, inst, state)
+	if strings.Count(row, "\n") != 1 || strings.Contains(row, "prompt:") || !strings.Contains(row, "General task") {
+		t.Fatalf("a folded session must look as stock agent-deck draws it, got %q", row)
+	}
+	if h.foldSummary(item) {
+		t.Fatal("left on a folded summary must fall through to the other folds")
+	}
+	if !h.toggleSummaryFold(item) || h.summaryCollapsed[inst.ID] {
+		t.Fatal("right on a folded summary must open it")
+	}
+	if !h.toggleSummaryFold(item) || !h.summaryCollapsed[inst.ID] {
+		t.Fatal("right on an open summary with nothing else to toggle must fold it")
+	}
+	h.summaryLines = false
+	if h.foldSummary(item) || h.toggleSummaryFold(item) {
+		t.Fatal("with summary_lines off the keys must keep their old meaning")
+	}
+}
+
+// Sessions created after the cut-off start folded until opened; older ones
+// start open.
+func TestSessionSummary_NewSessionsStartFolded(t *testing.T) {
+	cutoff := time.Now()
+	old := &session.Instance{ID: "old", Title: "old", Tool: "claude", CreatedAt: cutoff.Add(-time.Hour)}
+	fresh := &session.Instance{ID: "new", Title: "new", Tool: "claude", CreatedAt: cutoff.Add(time.Minute)}
+	h := &Home{summaryLines: true, summaryFoldNewAfter: cutoff, liveReplies: map[string]string{"old": "hi", "new": "hi"}}
+	h.sessionRenderSnapshot.Store(map[string]sessionRenderState{
+		"old": {status: session.StatusIdle, tool: "claude", title: "old"},
+		"new": {status: session.StatusIdle, tool: "claude", title: "new"},
+	})
+	if h.summaryFolded(old) || !h.summaryFolded(fresh) {
+		t.Fatalf("old folded=%v new folded=%v, want false and true", h.summaryFolded(old), h.summaryFolded(fresh))
+	}
+	item := session.Item{Type: session.ItemTypeSession, Session: fresh}
+	if !h.toggleSummaryFold(item) || h.summaryFolded(fresh) {
+		t.Fatal("right must open a new session's summary")
+	}
+	if !h.foldSummary(item) || !h.summaryFolded(fresh) {
+		t.Fatal("left must fold it again")
+	}
+}
+
+// With summary_lines the row keeps stock agent-deck's pane-title suffix,
+// open or folded.
+func TestSessionSummary_RowKeepsPaneTitle(t *testing.T) {
+	inst := &session.Instance{ID: "oc", Title: "development", Tool: "opencode"}
+	h := &Home{width: 200, summaryLines: true, showPaneTitles: true, livePrompts: map[string]string{"oc": "fix the build"}}
+	state := sessionRenderState{status: session.StatusIdle, tool: "opencode", title: "development", paneTitle: "OC | Commit message"}
+	lines := strings.Split(strings.TrimSuffix(summaryRow(t, h, inst, state), "\n"), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], "OC | Commit message") || !strings.Contains(lines[1], "prompt: fix the build") {
+		t.Fatalf("open: want the pane title on the row and the prompt below, got %q", lines)
+	}
+	h.summaryCollapsed = map[string]bool{"oc": true}
+	lines = strings.Split(strings.TrimSuffix(summaryRow(t, h, inst, state), "\n"), "\n")
+	if len(lines) != 1 || !strings.Contains(lines[0], "OC | Commit message") || strings.Contains(lines[0], "prompt:") {
+		t.Fatalf("folded: want only the row with its pane title, got %q", lines)
 	}
 }

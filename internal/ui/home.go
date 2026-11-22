@@ -771,6 +771,12 @@ type Home struct {
 	// summary: plan or todo, prompt and current activity (summary_lines.go).
 	// Default false. Loaded from config.Display.SummaryLines.
 	summaryLines bool
+	// summaryCollapsed and summaryExpanded hold the sessions the user folded
+	// or opened (left folds, right opens; summary_lines.go). Any other
+	// session created after summaryFoldNewAfter starts folded.
+	summaryCollapsed    map[string]bool
+	summaryExpanded     map[string]bool
+	summaryFoldNewAfter time.Time
 
 	// accountSlotsConfigured mirrors len(session.ConfiguredAccountNames(cfg)) > 0,
 	// the same gate the New/Edit Session dialogs use to hide their account rows
@@ -1221,6 +1227,13 @@ type uiState struct {
 	// are session-scoped UI state that is not persisted at all; a parent fold is
 	// a view preference like the remote folds above, so it rides here.
 	ParentChildrenCollapsed []string `json:"parent_children_collapsed,omitempty"`
+	// SummaryCollapsed and SummaryExpanded list the sessions whose summary
+	// lines the user folded or opened. SummaryFoldNewAfter (unix seconds) is
+	// when new sessions began to start folded: older sessions without an
+	// entry stay open.
+	SummaryCollapsed    []string `json:"summary_collapsed,omitempty"`
+	SummaryExpanded     []string `json:"summary_expanded,omitempty"`
+	SummaryFoldNewAfter int64    `json:"summary_fold_new_after,omitempty"`
 
 	// Folded remote parent-child lists (#3223): remote name -> parent session
 	// IDs. Nested like RemoteSessionOrder, so a session ID that two remotes
@@ -5874,6 +5887,9 @@ func (h *Home) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Expand/collapse group, or toggle session windows
 		if h.cursor < len(h.flatItems) {
 			item := h.flatItems[h.cursor]
+			if h.toggleSummaryFold(item) {
+				return h, nil
+			}
 			if item.Type == session.ItemTypeGroup {
 				groupPath := item.Path
 				h.groupTree.ToggleGroup(groupPath)
@@ -8870,24 +8886,17 @@ func (h *Home) renderSessionItem(
 	// so the prior measurement let the trailing pane-title text overflow
 	// the panel and shove subsequent rows down by one cell. See
 	// internal/ui/cellwidth.go for the upstream disagreement.
+	// With summary_lines the row keeps stock agent-deck's suffix (the pane
+	// title) whether its summary lines are open or folded; without it the
+	// summary itself is the suffix (summary_lines.go).
+	segs := summary.singleLine()
 	if h.summaryLines {
-		// One line per summary part under the row, aligned with the title.
-		b.WriteString(row)
-		b.WriteString("\n")
-		treeCont := "  "
-		if (nested && !item.IsLastSubSession) || (!nested && !item.IsLastInGroup) {
-			treeCont = TreeConnectorStyle.Render("│") + " "
+		segs = nil
+		if pane := originalPaneSubtitle(instState); pane != "" {
+			segs = []summarySeg{{text: pane}}
 		}
-		indent := strings.Repeat(" ", leftGutterWidth) + contBaseIndent + " " + treeCont +
-			strings.Repeat(" ", cellWidth(windowChevron)+cellWidth(status)+1)
-		for _, line := range summary.lines() {
-			b.WriteString(indent)
-			b.WriteString(renderSummarySegs(line, listWidth-cellWidth(indent)-2))
-			b.WriteString("\n")
-		}
-		return
 	}
-	if segs := summary.singleLine(); (selected || h.showPaneTitles) && len(segs) > 0 {
+	if (selected || h.showPaneTitles) && len(segs) > 0 {
 		// The snapshot label helper has already omitted generic pane titles.
 		// Dual layout: sidebar is narrower than h.width (#937). Using full
 		// terminal width here overflows the SESSIONS pane, then lipgloss
@@ -8901,6 +8910,27 @@ func (h *Home) renderSessionItem(
 
 	b.WriteString(row)
 	b.WriteString("\n")
+	if h.summaryShowsLines(inst) {
+		// One line per summary part under the row, aligned with the title and
+		// joined to it by "│", the last by "╰", as the embedded sidebar's card.
+		treeCont := "  "
+		if (nested && !item.IsLastSubSession) || (!nested && !item.IsLastInGroup) {
+			treeCont = TreeConnectorStyle.Render("│") + " "
+		}
+		indent := strings.Repeat(" ", leftGutterWidth) + contBaseIndent + " " + treeCont +
+			strings.Repeat(" ", cellWidth(windowChevron)+cellWidth(status)+1)
+		lines := summary.lines()
+		for i, line := range lines {
+			joint := "│ "
+			if i == len(lines)-1 {
+				joint = "╰ "
+			}
+			b.WriteString(indent)
+			b.WriteString(DimStyle.Render(joint))
+			b.WriteString(renderSummarySegs(line, listWidth-cellWidth(indent)-cellWidth(joint)-2))
+			b.WriteString("\n")
+		}
+	}
 }
 
 // openSessionSwitcher pops the switcher pre-highlighted on fromID (the session

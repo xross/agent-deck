@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"sort"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -436,6 +437,23 @@ func (h *Home) saveUIStateErr() error {
 		state.ParentChildrenCollapsed = foldedIDs
 	}
 
+	// Folded and opened session summaries, as session IDs.
+	for sid, isFolded := range h.summaryCollapsed {
+		if isFolded {
+			state.SummaryCollapsed = append(state.SummaryCollapsed, sid)
+		}
+	}
+	sort.Strings(state.SummaryCollapsed)
+	for sid, isOpen := range h.summaryExpanded {
+		if isOpen {
+			state.SummaryExpanded = append(state.SummaryExpanded, sid)
+		}
+	}
+	sort.Strings(state.SummaryExpanded)
+	if !h.summaryFoldNewAfter.IsZero() {
+		state.SummaryFoldNewAfter = h.summaryFoldNewAfter.Unix()
+	}
+
 	// Remote parent-child folds (#3223), as remote -> parent session IDs.
 	for remoteName, folds := range h.remoteParentChildrenCollapsed {
 		foldedIDs := make([]string, 0, len(folds))
@@ -519,6 +537,27 @@ func (h *Home) loadUIState() {
 	}
 	for _, sid := range state.ParentChildrenCollapsed {
 		h.parentChildrenCollapsed[sid] = true
+	}
+
+	// Folded session summaries, harmless for gone sessions the same way.
+	if h.summaryCollapsed == nil {
+		h.summaryCollapsed = make(map[string]bool)
+	}
+	for _, sid := range state.SummaryCollapsed {
+		h.summaryCollapsed[sid] = true
+	}
+	if h.summaryExpanded == nil {
+		h.summaryExpanded = make(map[string]bool)
+	}
+	for _, sid := range state.SummaryExpanded {
+		h.summaryExpanded[sid] = true
+	}
+	// Sessions created from the first run with this state on start folded;
+	// the ones already there keep their summary lines open.
+	if state.SummaryFoldNewAfter > 0 {
+		h.summaryFoldNewAfter = time.Unix(state.SummaryFoldNewAfter, 0)
+	} else {
+		h.summaryFoldNewAfter = time.Now()
 	}
 
 	// Remote parent-child folds (#3223), harmless for gone sessions the same

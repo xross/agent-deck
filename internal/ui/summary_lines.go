@@ -122,9 +122,28 @@ func (s sessionSummary) lines() [][]summarySeg {
 	return out
 }
 
+// summaryFolded reports whether a session's summary lines are folded: as the
+// user left them, else folded for a session created after
+// summaryFoldNewAfter (new sessions start folded) and open for an older one.
+func (h *Home) summaryFolded(inst *session.Instance) bool {
+	switch {
+	case h.summaryCollapsed[inst.ID]:
+		return true
+	case h.summaryExpanded[inst.ID]:
+		return false
+	}
+	return !h.summaryFoldNewAfter.IsZero() && inst.CreatedAt.After(h.summaryFoldNewAfter)
+}
+
+// summaryShowsLines reports whether a session row draws its summary as lines
+// under it: summary_lines is on and the session's summary is not folded.
+func (h *Home) summaryShowsLines(inst *session.Instance) bool {
+	return h.summaryLines && !h.summaryFolded(inst)
+}
+
 // summaryLineCount is how many summary lines a row draws under it.
 func (h *Home) summaryLineCount(item session.Item) int {
-	if !h.summaryLines || item.Type != session.ItemTypeSession || item.Session == nil {
+	if item.Type != session.ItemTypeSession || item.Session == nil || !h.summaryShowsLines(item.Session) {
 		return 0
 	}
 	return len(h.sessionSummaryFor(item.Session, h.getSessionRenderState(item.Session)).lines())
@@ -204,4 +223,68 @@ func renderSummarySegs(segs []summarySeg, budget int) string {
 		used += need
 	}
 	return b.String()
+}
+
+// originalPaneSubtitle is the dim suffix stock agent-deck shows: the pane
+// title, or an auto-named session's saved description.
+func originalPaneSubtitle(state sessionRenderState) string {
+	if state.paneTitle != "" {
+		return state.paneTitle
+	}
+	if state.autoName {
+		return cleanPaneTitle(state.autoNameDesc)
+	}
+	return ""
+}
+
+// foldSummary folds the selected session's summary lines away, leaving the
+// row as stock agent-deck draws it, the way left folds a group. It reports whether it did, so left
+// falls through to its other folds (children, windows, the group) when the
+// summary is already folded or has no lines.
+func (h *Home) foldSummary(item session.Item) bool {
+	if item.Type != session.ItemTypeSession || item.Session == nil || !h.summaryShowsLines(item.Session) || h.summaryLineCount(item) == 0 {
+		return false
+	}
+	h.setSummaryFolded(item.Session.ID, true)
+	return true
+}
+
+// toggleSummaryFold opens a folded summary on right/tab. On a session with
+// no children or windows to toggle it also folds an open summary, so the key
+// toggles there as it does on a group. It reports whether it acted.
+func (h *Home) toggleSummaryFold(item session.Item) bool {
+	if !h.summaryLines || item.Type != session.ItemTypeSession || item.Session == nil {
+		return false
+	}
+	id := item.Session.ID
+	if h.summaryFolded(item.Session) {
+		h.setSummaryFolded(id, false)
+		return true
+	}
+	if h.sessionHasChildren(item) || h.sessionHasWindows(item) || h.summaryLineCount(item) == 0 {
+		return false
+	}
+	h.setSummaryFolded(id, true)
+	return true
+}
+
+func (h *Home) setSummaryFolded(id string, folded bool) {
+	if h.summaryCollapsed == nil {
+		h.summaryCollapsed = make(map[string]bool)
+	}
+	if h.summaryExpanded == nil {
+		h.summaryExpanded = make(map[string]bool)
+	}
+	if folded {
+		h.summaryCollapsed[id] = true
+		delete(h.summaryExpanded, id)
+	} else {
+		delete(h.summaryCollapsed, id)
+		h.summaryExpanded[id] = true
+	}
+	if h.groupTree != nil {
+		// Row heights changed: re-derive the scroll window around the cursor.
+		h.rebuildFlatItemsPreservingSelection(h.captureSelectedItemIdentity())
+	}
+	_ = h.saveUIStateErr() // view preference; a dropped save self-heals next toggle
 }
