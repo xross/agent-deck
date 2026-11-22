@@ -714,25 +714,31 @@ func (h *Home) renderFrame() string {
 
 	// Status-based stats (more useful than group/session counts)
 	// Format: ● 2 running • ◐ 1 waiting • ○ 3 idle (• ✕ 1 error)
+	// With header_counts_visible each count covers open groups only, the
+	// total in brackets after it when it differs (header_counts.go).
+	visible := statusCounts{running, waiting, idle, stopped, errored}
+	if cfg, _ := session.LoadUserConfig(); cfg != nil && cfg.Display.HeaderCountsVisible {
+		visible = h.countVisibleSessionStatuses()
+	}
 	var statsParts []string
 	statsSep := lipgloss.NewStyle().Foreground(ColorBorder).Render(" • ")
 
 	if headerFieldSet[session.PreviewFieldSessionsByStatus] && running > 0 {
 		statsParts = append(
 			statsParts,
-			lipgloss.NewStyle().Foreground(ColorGreen).Render(fmt.Sprintf("● %d running", running)),
+			headerStat(ColorGreen, "●", visible.running, running, "running"),
 		)
 	}
 	if headerFieldSet[session.PreviewFieldSessionsByStatus] && waiting > 0 {
 		statsParts = append(
 			statsParts,
-			lipgloss.NewStyle().Foreground(ColorYellow).Render(fmt.Sprintf("◐ %d waiting", waiting)),
+			headerStat(ColorYellow, "◐", visible.waiting, waiting, "waiting"),
 		)
 	}
 	if headerFieldSet[session.PreviewFieldSessionsByStatus] && idle > 0 {
 		statsParts = append(
 			statsParts,
-			lipgloss.NewStyle().Foreground(ColorText).Render(fmt.Sprintf("○ %d idle", idle)),
+			headerStat(ColorText, "○", visible.idle, idle, "idle"),
 		)
 	}
 	if headerFieldSet[session.PreviewFieldSessionsByStatus] && stopped > 0 {
@@ -740,13 +746,13 @@ func (h *Home) renderFrame() string {
 		// at a glance how many sessions are intentionally off vs. errored.
 		statsParts = append(
 			statsParts,
-			lipgloss.NewStyle().Foreground(ColorTextDim).Render(fmt.Sprintf("■ %d stopped", stopped)),
+			headerStat(ColorTextDim, "■", visible.stopped, stopped, "stopped"),
 		)
 	}
 	if headerFieldSet[session.PreviewFieldSessionsByStatus] && errored > 0 {
 		statsParts = append(
 			statsParts,
-			lipgloss.NewStyle().Foreground(ColorRed).Render(fmt.Sprintf("✕ %d error", errored)),
+			headerStat(ColorRed, "✕", visible.errored, errored, "error"),
 		)
 	}
 

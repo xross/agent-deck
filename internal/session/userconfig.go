@@ -4527,6 +4527,12 @@ type DisplaySettings struct {
 	// Empty (the default) leaves the terminal's title alone.
 	DashboardTitle string `toml:"dashboard_title,omitempty"`
 
+	// HeaderCountsVisible makes the header's per-status session counts
+	// ("● 2 running • ◐ 1 waiting …") count only sessions in open (expanded)
+	// groups, with the total over all sessions after it in brackets when it
+	// differs: "● 1 (2) running". Valid values: true, false. Default: false.
+	HeaderCountsVisible bool `toml:"header_counts_visible,omitempty"`
+
 	// ShowSessionTimestamps appends a dim "Nm ago" badge to every session row.
 	// Default: false — opt-in to avoid crowding existing badges. See
 	// renderSessionItem for the timestamp source.

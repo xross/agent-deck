@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/asheshgoplani/agent-deck/internal/session"
 )
 
@@ -445,5 +447,41 @@ func TestViewOnly_OpenRecentGroups(t *testing.T) {
 		if got := h.groupTree.Groups[path].Expanded; got != want {
 			t.Errorf("group %q open = %v, want %v", path, got, want)
 		}
+	}
+}
+
+// With header_counts_visible the header counts cover open groups only, the
+// total in brackets when it differs.
+func TestHeaderCounts_OpenGroupsOnly(t *testing.T) {
+	if got := headerCount(1, 2); got != "1 (2)" {
+		t.Errorf("headerCount(1, 2) = %q", got)
+	}
+	if got := headerCount(3, 3); got != "3" {
+		t.Errorf("headerCount(3, 3) = %q", got)
+	}
+	open := &session.Instance{ID: "o", GroupPath: "work/busy"}
+	hidden := &session.Instance{ID: "h", GroupPath: "archive/old"}
+	h := &Home{groupTree: session.NewGroupTree([]*session.Instance{open, hidden}),
+		instanceByID: map[string]*session.Instance{"o": open, "h": hidden}}
+	h.groupTree.CollapseGroup("archive")
+	h.sessionRenderSnapshot.Store(map[string]sessionRenderState{
+		"o": {status: session.StatusRunning},
+		"h": {status: session.StatusRunning},
+	})
+	if got := h.countVisibleSessionStatuses(); got.running != 1 {
+		t.Errorf("visible running = %d, want 1 (a session under a folded parent group is hidden)", got.running)
+	}
+}
+
+func TestDarkenTowardBg(t *testing.T) {
+	InitTheme("dark")
+	got := darkenTowardBg(lipgloss.Color("#ffffff"), 0.5)
+	r, g, b, ok := parseHexColor(string(got))
+	br, bg, bb, _ := parseHexColor(string(ColorBg))
+	if !ok || r >= 0xff || r <= br || g <= bg || b <= bb {
+		t.Fatalf("darkenTowardBg(#ffffff) = %q, want between white and the background %q", got, ColorBg)
+	}
+	if got := darkenTowardBg(lipgloss.Color("3"), 0.5); got != "3" {
+		t.Fatalf("an ANSI colour must come back unchanged, got %q", got)
 	}
 }
