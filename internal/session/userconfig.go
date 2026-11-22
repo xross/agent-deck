@@ -4531,6 +4531,13 @@ type DisplaySettings struct {
 	// model they were launched with, and a session with none shows no badge.
 	// Valid values: true, false. Default: false.
 	ShowSessionModel bool `toml:"show_session_model,omitempty"`
+
+	// SummaryLines gives each session row extra lines for its summary
+	// instead of one dim suffix: the plan (Claude) or todo step (OpenCode),
+	// the last prompt, and while running what it is doing, each on its own
+	// line and left out when unknown. Valid values: true, false.
+	// Default: false.
+	SummaryLines bool `toml:"summary_lines,omitempty"`
 }
 
 // GetActiveFilterExcludes returns the resolved set of statuses the % filter

@@ -24,34 +24,86 @@ import (
 // The reads happen inside a tea.Cmd on a slow tick; Update only swaps in the
 // result and rows render from the cached map.
 
-const modelBadgePollInterval = 5 * time.Second
+// modelBadgePollInterval is short so a working session's activity line
+// keeps up with it; each poll reads only small tails and indexed rows.
+const modelBadgePollInterval = 2 * time.Second
 
-// modelBadgeFeed is where the poll reads live models from. The default
-// reads the profile's state DB and OpenCode's store; tests swap in a fake.
-type modelBadgeFeed interface {
-	// Models returns the live model ID per agent-deck session ID. openCode
-	// maps agent-deck session ID to OpenCode session ID for the OpenCode
-	// sessions to look up.
-	Models(openCode map[string]string) (map[string]string, error)
+// modelBadgePoll is one read of what the tools themselves say each session
+// is doing, keyed by agent-deck session ID.
+type modelBadgePoll struct {
+	// models is the live model ID.
+	models map[string]string
+	// todos is each OpenCode session's latest todo step, and prompts each
+	// session's last prompt, read from the tools' own records.
+	todos   map[string]string
+	prompts map[string]string
+	// activities is each session's newest tool call ("bash: go test"),
+	// shown in place of the subtitle while the session is running.
+	activities map[string]string
+	// plans is the heading of each Claude session's newest plan.
+	plans map[string]string
+	// replies is the first line of each session's newest agent reply.
+	replies map[string]string
 }
 
-type stateDBModelBadgeFeed struct{}
+// modelBadgeTargets is what one poll looks up: OpenCode sessions as
+// agent-deck ID to OpenCode session ID, and Claude sessions as agent-deck ID
+// to transcript path.
+type modelBadgeTargets struct {
+	openCode map[string]string
+	claude   map[string]string
+}
 
-func (stateDBModelBadgeFeed) Models(openCode map[string]string) (map[string]string, error) {
+// modelBadgeFeed is where the poll reads from. The default reads the
+// profile's state DB and OpenCode's store; tests swap in a fake.
+type modelBadgeFeed interface {
+	Poll(targets modelBadgeTargets) (modelBadgePoll, error)
+}
+
+type stateDBModelBadgeFeed struct {
+	claude *session.ClaudeTranscriptWatcher
+}
+
+func (f stateDBModelBadgeFeed) Poll(targets modelBadgeTargets) (modelBadgePoll, error) {
+	openCode := targets.openCode
 	db := statedb.GetGlobal()
 	if db == nil {
-		return nil, errTriggersNoDB
+		return modelBadgePoll{}, errTriggersNoDB
 	}
 	records, err := db.ClaudeStatuslineModels()
 	if err != nil {
-		return nil, err
+		return modelBadgePoll{}, err
 	}
-	out := make(map[string]string, len(records)+len(openCode))
+	out := modelBadgePoll{
+		models:     make(map[string]string, len(records)+len(openCode)),
+		todos:      make(map[string]string, len(openCode)),
+		prompts:    make(map[string]string, len(openCode)),
+		activities: make(map[string]string, len(openCode)+len(targets.claude)),
+		plans:      make(map[string]string, len(targets.claude)),
+		replies:    make(map[string]string, len(openCode)+len(targets.claude)),
+	}
+	if f.claude != nil {
+		for id, path := range targets.claude {
+			live := f.claude.Read(path)
+			if live.Activity != "" {
+				out.activities[id] = live.Activity
+			}
+			if live.Plan != "" {
+				out.plans[id] = live.Plan
+			}
+			if live.Prompt != "" {
+				out.prompts[id] = live.Prompt
+			}
+			if live.Reply != "" {
+				out.replies[id] = live.Reply
+			}
+		}
+	}
 	for id, m := range records {
 		if m.ID != "" {
-			out[id] = m.ID
+			out.models[id] = m.ID
 		} else {
-			out[id] = m.DisplayName
+			out.models[id] = m.DisplayName
 		}
 	}
 	// OpenCode's store belongs to OpenCode: a failed read there leaves those
@@ -60,10 +112,23 @@ func (stateDBModelBadgeFeed) Models(openCode map[string]string) (map[string]stri
 	for _, nativeID := range openCode {
 		nativeIDs = append(nativeIDs, nativeID)
 	}
-	if live, err := session.OpenCodeLiveModels(nativeIDs); err == nil {
+	if live, err := session.OpenCodeLiveSessions(nativeIDs); err == nil {
 		for id, nativeID := range openCode {
-			if model := live[nativeID]; model != "" {
-				out[id] = model
+			l := live[nativeID]
+			if l.Model != "" {
+				out.models[id] = l.Model
+			}
+			if l.Todo != "" {
+				out.todos[id] = l.Todo
+			}
+			if l.Prompt != "" {
+				out.prompts[id] = l.Prompt
+			}
+			if l.Reply != "" {
+				out.replies[id] = l.Reply
+			}
+			if l.Activity != "" {
+				out.activities[id] = l.Activity
 			}
 		}
 	}
@@ -73,40 +138,57 @@ func (stateDBModelBadgeFeed) Models(openCode map[string]string) (map[string]stri
 type modelBadgeTickMsg struct{ gen int }
 
 type modelBadgePolledMsg struct {
-	gen    int
-	models map[string]string
-	err    error
+	gen  int
+	poll modelBadgePoll
+	err  error
 }
 
-// openCodeSessionIDs snapshots the OpenCode sessions' native IDs on the
+// modelBadgeTargetsSnapshot collects what the next poll looks up, on the
 // Update goroutine, so the background read never touches an Instance.
-func (h *Home) openCodeSessionIDs() map[string]string {
+// Claude transcript paths are resolved once per conversation and cached.
+func (h *Home) modelBadgeTargetsSnapshot() modelBadgeTargets {
 	h.instancesMu.RLock()
 	defer h.instancesMu.RUnlock()
-	out := make(map[string]string)
+	out := modelBadgeTargets{openCode: make(map[string]string), claude: make(map[string]string)}
+	if h.claudeTranscriptPaths == nil {
+		h.claudeTranscriptPaths = make(map[string]string)
+	}
 	for _, inst := range h.instances {
-		if inst != nil && inst.Tool == "opencode" && inst.OpenCodeSessionID != "" {
-			out[inst.ID] = inst.OpenCodeSessionID
+		if inst == nil {
+			continue
+		}
+		switch {
+		case inst.Tool == "opencode" && inst.OpenCodeSessionID != "":
+			out.openCode[inst.ID] = inst.OpenCodeSessionID
+		case session.IsClaudeCompatible(inst.Tool) && inst.ClaudeSessionID != "":
+			key := inst.ID + "\x00" + inst.ClaudeSessionID
+			path, ok := h.claudeTranscriptPaths[key]
+			if !ok {
+				path = session.ListedTranscriptPath(inst)
+				if path != "" {
+					h.claudeTranscriptPaths[key] = path
+				}
+			}
+			if path != "" {
+				out.claude[inst.ID] = path
+			}
 		}
 	}
 	return out
 }
 
-// modelBadgePollCmd reads the live models now. With the badge switched off
-// it only re-arms the tick, so turning the option on needs no restart.
+// modelBadgePollCmd reads the live models and subtitles now. It runs whether
+// or not the model badge is shown: the OpenCode subtitles use it too.
 func (h *Home) modelBadgePollCmd() tea.Cmd {
 	feed := h.modelBadgeFeed
 	if feed == nil {
 		return nil
 	}
-	if !h.showSessionModel {
-		return h.modelBadgeTick()
-	}
 	gen := h.modelBadgePollGen
-	openCode := h.openCodeSessionIDs()
+	targets := h.modelBadgeTargetsSnapshot()
 	return func() tea.Msg {
-		models, err := feed.Models(openCode)
-		return modelBadgePolledMsg{gen: gen, models: models, err: err}
+		poll, err := feed.Poll(targets)
+		return modelBadgePolledMsg{gen: gen, poll: poll, err: err}
 	}
 }
 
@@ -139,7 +221,12 @@ func (h *Home) handleModelBadgeMsg(msg tea.Msg) tea.Cmd {
 		return h.modelBadgePollCmd()
 	case modelBadgePolledMsg:
 		if msg.err == nil {
-			h.liveModels = msg.models
+			h.liveModels = msg.poll.models
+			h.liveTodos = msg.poll.todos
+			h.livePrompts = msg.poll.prompts
+			h.liveActivities = msg.poll.activities
+			h.livePlans = msg.poll.plans
+			h.liveReplies = msg.poll.replies
 		}
 		h.rebuildModelLabels()
 		if msg.gen != h.modelBadgePollGen {

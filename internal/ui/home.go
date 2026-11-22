@@ -319,10 +319,18 @@ type Home struct {
 	// Model row badge (model_badge.go): liveModels is the last poll of the
 	// models Claude sessions reported through their status line; modelLabels
 	// is the per-session row label resolved from it and the launch model.
-	modelBadgeFeed    modelBadgeFeed
-	liveModels        map[string]string
-	modelLabels       map[string]string
-	modelBadgePollGen int
+	modelBadgeFeed modelBadgeFeed
+	liveModels     map[string]string
+	liveTodos      map[string]string
+	livePrompts    map[string]string
+	liveActivities map[string]string
+	livePlans      map[string]string
+	liveReplies    map[string]string
+	// claudeTranscriptPaths caches each Claude conversation's transcript
+	// path, keyed by session ID and Claude session ID (model_badge.go).
+	claudeTranscriptPaths map[string]string
+	modelLabels           map[string]string
+	modelBadgePollGen     int
 	// Voice mic badge (voice_badge.go): the reader stats ~/.claude/voice on
 	// the tick; rows render from voiceState only. voiceNow is the clock the
 	// badge words use (nil = time.Now).
@@ -758,6 +766,11 @@ type Home struct {
 	// "[model]" badge on its row (model_badge.go). Default false. Loaded from
 	// config.Display.ShowSessionModel.
 	showSessionModel bool
+
+	// summaryLines, when true, gives each session row extra lines for its
+	// summary: plan or todo, prompt and current activity (summary_lines.go).
+	// Default false. Loaded from config.Display.SummaryLines.
+	summaryLines bool
 
 	// accountSlotsConfigured mirrors len(session.ConfiguredAccountNames(cfg)) > 0,
 	// the same gate the New/Edit Session dialogs use to hide their account rows
@@ -5170,6 +5183,7 @@ func (h *Home) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 				h.showSessionTimestamps = config.Display.ShowSessionTimestamps
 				h.showPaneTitles = config.Display.ShowPaneTitles
 				h.showSessionModel = config.Display.ShowSessionModel
+				h.summaryLines = config.Display.SummaryLines
 				h.hiddenToolBadge = hiddenToolBadgeFor(config)
 				h.setAccountSlotsConfigured(len(session.ConfiguredAccountNames(config)) > 0)
 				h.applySavedLayoutSettings(config.UI)
@@ -7097,7 +7111,7 @@ func (h *Home) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Remote decks refresh in the same keystroke, so a change made on a
 		// remote (or from another machine) shows up now, not at the next poll.
 		state := h.preserveState()
-		// The user asked for a refresh now: a host held by poll backoff is
+		// The user asked for a refresh todo: a host held by poll backoff is
 		// polled at once (still one poll per host at a time).
 		h.clearRemotePollBackoff("")
 		h.remoteSessionsMu.Lock()
@@ -8473,6 +8487,9 @@ func (h *Home) renderSessionItem(
 		}
 	}
 
+	// Summary lines under the row reuse the unselected indent (summary_lines.go).
+	contBaseIndent := baseIndent
+
 	// Tree connector: └─ for last item, ├─ for others
 	treeConnector := treeBranch
 	if nested {
@@ -8706,7 +8723,10 @@ func (h *Home) renderSessionItem(
 	// Snapshot form only here: the per-row Instance.mu reads the inst-based
 	// form does can block behind a mid-sweep UpdateStatus writer for seconds,
 	// scaling with visible rows (#1753 black-screen).
-	displayTitle, paneSubtitle := sessionDisplayLabelsFromState(instState)
+	displayTitle, _ := sessionDisplayLabelsFromState(instState)
+	// The dim suffix: what the session is doing, was last prompted with and
+	// planned, or its pane title (summary_lines.go).
+	summary := h.sessionSummaryFor(inst, instState)
 	// Pin marker (pin-sessions): a 📌 prefix flags any pinned row. Position in
 	// the list conveys top vs bottom; the emoji conveys "this is pinned".
 	// Prepended before the AutoName truncation budget so width accounting below
@@ -8850,7 +8870,24 @@ func (h *Home) renderSessionItem(
 	// so the prior measurement let the trailing pane-title text overflow
 	// the panel and shove subsequent rows down by one cell. See
 	// internal/ui/cellwidth.go for the upstream disagreement.
-	if (selected || h.showPaneTitles) && paneSubtitle != "" {
+	if h.summaryLines {
+		// One line per summary part under the row, aligned with the title.
+		b.WriteString(row)
+		b.WriteString("\n")
+		treeCont := "  "
+		if (nested && !item.IsLastSubSession) || (!nested && !item.IsLastInGroup) {
+			treeCont = TreeConnectorStyle.Render("│") + " "
+		}
+		indent := strings.Repeat(" ", leftGutterWidth) + contBaseIndent + " " + treeCont +
+			strings.Repeat(" ", cellWidth(windowChevron)+cellWidth(status)+1)
+		for _, line := range summary.lines() {
+			b.WriteString(indent)
+			b.WriteString(renderSummarySegs(line, listWidth-cellWidth(indent)-2))
+			b.WriteString("\n")
+		}
+		return
+	}
+	if segs := summary.singleLine(); (selected || h.showPaneTitles) && len(segs) > 0 {
 		// The snapshot label helper has already omitted generic pane titles.
 		// Dual layout: sidebar is narrower than h.width (#937). Using full
 		// terminal width here overflows the SESSIONS pane, then lipgloss
@@ -8858,11 +8895,7 @@ func (h *Home) renderSessionItem(
 		// rows visually and mouseY→item indexing breaks until scroll settles.
 		remaining := listWidth - cellWidth(row) - 2 // -2 for trailing margin
 		if remaining > 10 {
-			pt := paneSubtitle
-			if cellWidth(pt) > remaining {
-				pt = cellTruncate(pt, remaining, "…")
-			}
-			row += DimStyle.Render(" " + pt)
+			row += " " + renderSummarySegs(segs, remaining-1)
 		}
 	}
 

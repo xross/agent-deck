@@ -52,15 +52,16 @@ func TestFitModelBadge(t *testing.T) {
 
 type fakeModelBadgeFeed struct {
 	models   map[string]string
+	todos    map[string]string
 	err      error
 	calls    int
 	openCode map[string]string
 }
 
-func (f *fakeModelBadgeFeed) Models(openCode map[string]string) (map[string]string, error) {
+func (f *fakeModelBadgeFeed) Poll(targets modelBadgeTargets) (modelBadgePoll, error) {
 	f.calls++
-	f.openCode = openCode
-	return f.models, f.err
+	f.openCode = targets.openCode
+	return modelBadgePoll{models: f.models, todos: f.todos}, f.err
 }
 
 // renderRowWithModel renders one claude session row (launched on opus) after
@@ -79,7 +80,7 @@ func renderRowWithModel(t *testing.T, show bool, live map[string]string, listWid
 		instances:        []*session.Instance{inst},
 		modelBadgeFeed:   &fakeModelBadgeFeed{models: live},
 	}
-	h.handleModelBadgeMsg(modelBadgePolledMsg{models: live})
+	h.handleModelBadgeMsg(modelBadgePolledMsg{poll: modelBadgePoll{models: live}})
 
 	item := session.Item{Type: session.ItemTypeSession, Session: inst, Level: 1, Path: "test", IsLastInGroup: true}
 	snapshot := map[string]sessionRenderState{inst.ID: {status: session.StatusRunning, tool: "claude", title: inst.Title}}
@@ -122,22 +123,18 @@ func TestModelBadge_DroppedBeforeTitleOnNarrowList(t *testing.T) {
 	}
 }
 
-// A failed poll keeps the last live models; the option being off skips the
-// read but keeps the loop alive so turning it on needs no restart.
+// A failed poll keeps the last live models, and a session-list reload
+// restarts the loop.
 func TestModelBadge_PollLoop(t *testing.T) {
-	feed := &fakeModelBadgeFeed{models: map[string]string{"a": "claude-opus-5-5"}}
+	feed := &fakeModelBadgeFeed{
+		models: map[string]string{"a": "claude-opus-5-5"},
+		todos:  map[string]string{"oc": "run the tests"},
+	}
 	h := &Home{modelBadgeFeed: feed, instances: []*session.Instance{
 		{ID: "oc", Tool: "opencode", OpenCodeSessionID: "ses_1"},
 		{ID: "oc-unbound", Tool: "opencode"},
 		{ID: "cl", Tool: "claude"},
 	}}
-
-	if cmd := h.modelBadgePollCmd(); cmd == nil {
-		t.Fatal("poll with the badge off must still re-arm the tick")
-	}
-	if feed.calls != 0 {
-		t.Fatalf("poll with the badge off must not read the feed, got %d reads", feed.calls)
-	}
 
 	h.showSessionModel = true
 	msg := h.modelBadgePollCmd()()
@@ -152,6 +149,9 @@ func TestModelBadge_PollLoop(t *testing.T) {
 	}
 	if h.liveModels["a"] != "claude-opus-5-5" {
 		t.Fatalf("polled models must be installed, got %v", h.liveModels)
+	}
+	if h.liveTodos["oc"] != "run the tests" {
+		t.Fatalf("polled todos must be installed, got %v", h.liveTodos)
 	}
 
 	h.handleModelBadgeMsg(modelBadgePolledMsg{err: errors.New("database is locked")})
@@ -174,5 +174,126 @@ func TestModelBadge_PollLoop(t *testing.T) {
 	}
 	if cmd := h.handleModelBadgeMsg(modelBadgePolledMsg{gen: h.modelBadgePollGen - 1}); cmd != nil {
 		t.Fatal("a result from the retired loop must not re-arm a tick")
+	}
+}
+
+func summaryRow(t *testing.T, h *Home, inst *session.Instance, state sessionRenderState) string {
+	t.Helper()
+	forceTrueColorProfile()
+	item := session.Item{Type: session.ItemTypeSession, Session: inst, Level: 1, Path: "test", IsLastInGroup: true}
+	var b strings.Builder
+	h.renderSessionItem(&b, item, false, map[string]sessionRenderState{inst.ID: state}, h.width)
+	return stripAnsi(b.String())
+}
+
+// Claude and OpenCode rows share one summary shape: doing (while running),
+// prompt, then the plan or todo step. A stale pane title is replaced.
+func TestSessionSummary_SingleLine(t *testing.T) {
+	claude := &session.Instance{ID: "cl", Title: "General", Tool: "claude"}
+	oc := &session.Instance{ID: "oc", Title: "development", Tool: "opencode"}
+	h := &Home{width: 220, showPaneTitles: true,
+		livePlans:      map[string]string{"cl": "Make the rate window XC-safe"},
+		liveTodos:      map[string]string{"oc": "run the tests"},
+		livePrompts:    map[string]string{"oc": "is that better?"},
+		liveActivities: map[string]string{"cl": "bash: go test ./...", "oc": "edit: lcd.c"},
+	}
+	cases := []struct {
+		name  string
+		inst  *session.Instance
+		state sessionRenderState
+		want  string
+		not   string
+	}{
+		{"claude idle", claude, sessionRenderState{status: session.StatusIdle, tool: "claude", title: "General", paneTitle: "General", latestPrompt: "fix the build"},
+			"prompt: fix the build · plan: Make the rate window XC-safe", "doing:"},
+		{"claude running keeps the prompt", claude, sessionRenderState{status: session.StatusRunning, tool: "claude", title: "General", latestPrompt: "fix the build"},
+			"prompt: fix the build · doing: bash: go test ./... · plan: Make", ""},
+		{"opencode idle replaces the stale pane title", oc, sessionRenderState{status: session.StatusIdle, tool: "opencode", title: "development", paneTitle: "OC | Commit message"},
+			"prompt: is that better? · todo: run the tests", "Commit message"},
+		{"opencode running", oc, sessionRenderState{status: session.StatusRunning, tool: "opencode", title: "development"},
+			"prompt: is that better? · doing: edit: lcd.c · todo: run the tests", ""},
+	}
+	for _, tc := range cases {
+		row := summaryRow(t, h, tc.inst, tc.state)
+		if !strings.Contains(row, tc.want) {
+			t.Errorf("%s: row %q must contain %q", tc.name, row, tc.want)
+		}
+		if tc.not != "" && strings.Contains(row, tc.not) {
+			t.Errorf("%s: row %q must not contain %q", tc.name, row, tc.not)
+		}
+	}
+}
+
+// With summary_lines each part gets its own line under the row, and the
+// row's height counts them so scrolling and clicks line up.
+func TestSessionSummary_Lines(t *testing.T) {
+	inst := &session.Instance{ID: "cl", Title: "General", Tool: "claude"}
+	h := &Home{width: 200, summaryLines: true,
+		livePlans:      map[string]string{"cl": "Make the rate window XC-safe"},
+		liveActivities: map[string]string{"cl": "bash: go test ./..."},
+	}
+	state := sessionRenderState{status: session.StatusRunning, tool: "claude", title: "General", latestPrompt: "fix the build"}
+	lines := strings.Split(strings.TrimSuffix(summaryRow(t, h, inst, state), "\n"), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("want the row plus 3 summary lines, got %d: %q", len(lines), lines)
+	}
+	for i, want := range []string{"prompt: fix the build", "plan: Make the rate window XC-safe", "doing: bash: go test ./..."} {
+		if !strings.Contains(lines[i+1], want) || strings.Contains(lines[i+1], "·") {
+			t.Errorf("line %d = %q, want only %q", i+1, lines[i+1], want)
+		}
+	}
+	if got := strings.Index(lines[1], "prompt:"); got != strings.Index(lines[0], "General") {
+		t.Errorf("summary lines must align with the title: prompt at %d, title at %d", got, strings.Index(lines[0], "General"))
+	}
+
+	h.sessionRenderSnapshot.Store(map[string]sessionRenderState{inst.ID: state})
+	item := session.Item{Type: session.ItemTypeSession, Session: inst}
+	if got := h.sidebarItemRenderHeightAtWidthLines(item, 200, 1); got != 4 {
+		t.Errorf("row height = %d, want 4", got)
+	}
+	if got := h.sidebarItemsHeightWithLines([]session.Item{item, {Type: session.ItemTypeGroup}}, 0, 2, 200, 1); got != 5 {
+		t.Errorf("list height = %d, want 5", got)
+	}
+	h.summaryLines = false
+	if got := h.sidebarItemRenderHeightAtWidthLines(item, 200, 1); got != 1 {
+		t.Errorf("row height with summary_lines off = %d, want 1", got)
+	}
+}
+
+func TestRenderSummarySegs_Truncates(t *testing.T) {
+	segs := []summarySeg{{"prompt", "fix the build"}, {"todo", "run every test in the tree"}}
+	if got := stripAnsi(renderSummarySegs(segs, 100)); got != "prompt: fix the build · todo: run every test in the tree" {
+		t.Errorf("unbounded = %q", got)
+	}
+	if got := stripAnsi(renderSummarySegs(segs, 34)); got != "prompt: fix the build · todo: run…" {
+		t.Errorf("cut = %q", got)
+	}
+	if got := stripAnsi(renderSummarySegs(segs, 27)); got != "prompt: fix the build" {
+		t.Errorf("a part with under 6 cells left must be dropped, got %q", got)
+	}
+}
+
+// Without a plan or todo a row falls back to the agent's newest reply.
+func TestSessionSummary_ReplyFallback(t *testing.T) {
+	inst := &session.Instance{ID: "cl", Title: "General", Tool: "claude"}
+	h := &Home{width: 220, showPaneTitles: true, liveReplies: map[string]string{"cl": "Both changes are in."}}
+	state := sessionRenderState{status: session.StatusIdle, tool: "claude", title: "General", latestPrompt: "fix the build"}
+	if row := summaryRow(t, h, inst, state); !strings.Contains(row, "prompt: fix the build · reply: Both changes are in.") {
+		t.Fatalf("row must fall back to the reply, got %q", row)
+	}
+	h.livePlans = map[string]string{"cl": "Make it XC-safe"}
+	if row := summaryRow(t, h, inst, state); strings.Contains(row, "reply:") || !strings.Contains(row, "plan: Make it XC-safe") {
+		t.Fatalf("a plan must win over the reply, got %q", row)
+	}
+}
+
+// A long reply is cut to a short line ending in "…".
+func TestSessionSummary_ReplyTruncated(t *testing.T) {
+	inst := &session.Instance{ID: "cl", Title: "General", Tool: "claude"}
+	long := strings.Repeat("word ", 30)
+	h := &Home{width: 220, summaryLines: true, liveReplies: map[string]string{"cl": long}}
+	s := h.sessionSummaryFor(inst, sessionRenderState{status: session.StatusIdle, tool: "claude", title: "General"})
+	if cellWidth(s.step) > summaryReplyWidth || !strings.HasSuffix(s.step, "…") {
+		t.Fatalf("reply = %q (%d cells), want at most %d ending in …", s.step, cellWidth(s.step), summaryReplyWidth)
 	}
 }

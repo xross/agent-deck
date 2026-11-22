@@ -204,7 +204,7 @@ func NewHomeWithProfileAndMode(profile string) *Home {
 		deadLetterPanel:           NewDeadLetterPanel(),
 		todosPanel:                NewTodosPanel(actualProfile),
 		triggersFeed:              stateDBTriggersFeed{},
-		modelBadgeFeed:            stateDBModelBadgeFeed{},
+		modelBadgeFeed:            stateDBModelBadgeFeed{claude: &session.ClaudeTranscriptWatcher{}},
 		voiceReader:               voicestate.NewReader(voicestate.DefaultDir()),
 		toolVisibilityPanel:       NewToolVisibilityPanel(),
 		insertBatchDuration:       defaultInsertBatchDuration,
@@ -287,6 +287,7 @@ func NewHomeWithProfileAndMode(profile string) *Home {
 		h.showSessionTimestamps = cfg.Display.ShowSessionTimestamps
 		h.showPaneTitles = cfg.Display.ShowPaneTitles
 		h.showSessionModel = cfg.Display.ShowSessionModel
+		h.summaryLines = cfg.Display.SummaryLines
 		h.sysStatsConfig = cfg.SystemStats
 		h.costLineTemplate, h.costLineHideWhenZero = session.ResolveCostLineTemplate(cfg, actualProfile)
 		h.previewPct = cfg.UI.GetPreviewPct()

@@ -251,6 +251,7 @@ type sessionRenderState struct {
 	title          string // Instance.Title at snapshot time
 	autoName       bool   // session may show a captured/live task description as a suffix
 	autoNameDesc   string // last persisted auto-name description (fallback when paneTitle empty)
+	latestPrompt   string // last prompt sent to the agent (fallback when paneTitle only repeats the title)
 	// archived is true for any archived session, including an archived
 	// cross-harness source superseded by a "Restart with new session ID"
 	// target. The header pill skips these so it matches `agent-deck status`
@@ -312,7 +313,46 @@ func sessionDisplayLabelsFromState(state sessionRenderState) (title, subtitle st
 	if state.autoName && subtitle == "" {
 		subtitle = cleanPaneTitle(state.autoNameDesc)
 	}
+	// Claude titles its terminal after the session's name, and the deck names
+	// every Claude session it starts, so a Claude pane title is a name (the
+	// current title, or an older one from before a deck rename), never the
+	// task. Show what the session was last asked to do instead. For any tool,
+	// a pane title that only repeats the title gives way to the prompt too.
+	prompt := promptSubtitle(state.latestPrompt)
+	switch {
+	case prompt != "" && session.IsClaudeCompatible(state.tool):
+		subtitle = prompt
+	case paneTitleRepeatsTitle(subtitle, title):
+		subtitle = prompt
+	}
 	return title, subtitle
+}
+
+// openCodePaneTitlePrefix is what OpenCode puts in front of its terminal title.
+const openCodePaneTitlePrefix = "OC | "
+
+// paneTitleRepeatsTitle reports whether a cleaned pane title is empty or is
+// just the session title again, ignoring case and OpenCode's "OC | " prefix.
+func paneTitleRepeatsTitle(paneTitle, title string) bool {
+	paneTitle = strings.TrimSpace(strings.TrimPrefix(paneTitle, openCodePaneTitlePrefix))
+	return paneTitle == "" || strings.EqualFold(paneTitle, strings.TrimSpace(title))
+}
+
+// promptSubtitle turns the last prompt into a one-line row suffix: its first
+// non-empty line with whitespace collapsed. A slash command ("/compact") is
+// not a description of the work, so it yields nothing.
+func promptSubtitle(prompt string) string {
+	for _, line := range strings.Split(prompt, "\n") {
+		line = strings.Join(strings.Fields(line), " ")
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "/") {
+			return ""
+		}
+		return line
+	}
+	return ""
 }
 
 // cleanPaneTitle strips spinner/done marker characters from a tmux pane title
@@ -419,6 +459,7 @@ func (h *Home) refreshSessionRenderSnapshot(instances []*session.Instance) {
 			title:        inst.GetTitleThreadSafe(),
 			autoName:     inst.GetAutoName(),
 			autoNameDesc: inst.GetAutoNameDescription(),
+			latestPrompt: inst.GetLatestPrompt(),
 		}
 		// Look up pane title from the already-refreshed tmux cache.
 		// Only RefreshPaneInfoCache (called from backgroundStatusUpdate) keeps

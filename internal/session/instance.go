@@ -3040,6 +3040,14 @@ func (i *Instance) GetAutoName() bool {
 	return i.AutoName
 }
 
+// GetLatestPrompt returns the last prompt the user sent the agent, as the
+// status loop last read it from the agent's transcript. Thread-safe.
+func (i *Instance) GetLatestPrompt() string {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.LatestPrompt
+}
+
 // SetAutoName updates whether this session should display a captured/live task
 // description instead of its machine-generated handle. Thread-safe.
 func (i *Instance) SetAutoName(autoName bool) {
