@@ -552,7 +552,7 @@ func initStyles() {
 		"aider":    lipgloss.NewStyle().Foreground(ColorRed),
 		"cursor":   lipgloss.NewStyle().Foreground(ColorAccent),
 		"shell":    lipgloss.NewStyle().Foreground(ColorText),
-		"opencode": lipgloss.NewStyle().Foreground(ColorText),
+		"opencode": lipgloss.NewStyle().Foreground(ColorAccent),
 		"crush":    lipgloss.NewStyle().Foreground(ColorPurple),
 		"muse":     lipgloss.NewStyle().Foreground(ColorGreen),
 	}
@@ -677,6 +677,8 @@ func ToolColor(tool string) lipgloss.Color {
 		return ColorPurple // Pink/magenta for Charm Crush
 	case "muse":
 		return ColorGreen // Green for Muse Code
+	case "opencode":
+		return ColorAccent // Blue for OpenCode (green is the summary's "doing")
 	case "cursor":
 		return ColorAccent // Blue for Cursor
 	case "hermes":
