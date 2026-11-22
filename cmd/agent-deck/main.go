@@ -831,6 +831,19 @@ func main() {
 	groupScope, args = extractGroupFlag(args)
 	var initialSelect string
 	initialSelect, _ = extractSelectFlag(args)
+	var viewOnly bool
+	viewOnly, args = extractViewOnlyFlag(args)
+	viewOnlyRecent := ui.DefaultViewOnlyRecent
+	var recentArg string
+	recentArg, args = extractRecentFlag(args)
+	if recentArg != "" {
+		d, err := parseRecentDuration(recentArg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: --recent %q: %v (e.g. 2d, 36h, 90m)\n", recentArg, err)
+			exitCLI(2)
+		}
+		viewOnlyRecent = d
+	}
 	if groupScope != "" {
 		normalizedGroup := normalizeGroupPath(groupScope)
 		// Validate group exists by loading current sessions
@@ -1221,6 +1234,9 @@ func main() {
 	}
 	if initialSelect != "" {
 		homeModel.SetInitialSelection(initialSelect)
+	}
+	if viewOnly {
+		homeModel.SetViewOnly(true, viewOnlyRecent)
 	}
 
 	// ═══════════════════════════════════════════════════════════════════
@@ -1808,6 +1824,62 @@ func extractGroupFlag(args []string) (string, []string) {
 	}
 
 	return group, remaining
+}
+
+// extractViewOnlyFlag extracts --view-only: open the TUI as a status board,
+// the session list alone with keys that only move, fold, filter and quit.
+func extractViewOnlyFlag(args []string) (bool, []string) {
+	var on bool
+	remaining := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == "--view-only" {
+			on = true
+			continue
+		}
+		remaining = append(remaining, arg)
+	}
+	return on, remaining
+}
+
+// extractRecentFlag extracts --recent <duration> (with --view-only: open the
+// groups with a session active within it, default 2 days).
+func extractRecentFlag(args []string) (string, []string) {
+	var value string
+	remaining := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "--recent=") {
+			value = strings.TrimPrefix(arg, "--recent=")
+			continue
+		}
+		if arg == "--recent" && i+1 < len(args) {
+			value = args[i+1]
+			i++
+			continue
+		}
+		remaining = append(remaining, arg)
+	}
+	return value, remaining
+}
+
+// parseRecentDuration reads a duration in days ("2d") or Go syntax ("36h").
+func parseRecentDuration(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.ParseFloat(days, 64)
+		if err != nil || n <= 0 {
+			return 0, fmt.Errorf("not a positive number of days")
+		}
+		return time.Duration(n * float64(24*time.Hour)), nil
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0, err
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("must be positive")
+	}
+	return d, nil
 }
 
 // extractSelectFlag extracts --select <session-id-or-title> from args (#709).

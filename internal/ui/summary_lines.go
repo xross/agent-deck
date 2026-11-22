@@ -138,7 +138,22 @@ func (h *Home) summaryFolded(inst *session.Instance) bool {
 // summaryShowsLines reports whether a session row draws its summary as lines
 // under it: summary_lines is on and the session's summary is not folded.
 func (h *Home) summaryShowsLines(inst *session.Instance) bool {
-	return h.summaryLines && !h.summaryFolded(inst)
+	return (h.summaryLines || h.viewOnly) && !h.summaryFolded(inst)
+}
+
+// shownSummaryLines is the summary lines a row draws: all of them, or on the
+// view-only board only what a running session is doing, so idle rows stay
+// one line and the board lights up where work is happening.
+func (h *Home) shownSummaryLines(s sessionSummary) [][]summarySeg {
+	if !h.viewOnly {
+		return s.lines()
+	}
+	if s.doing == "" {
+		return nil
+	}
+	seg := s.doingSeg()
+	seg.text = truncateDisplay(seg.text, summaryReplyWidth, "…")
+	return [][]summarySeg{{seg}}
 }
 
 // summaryLineCount is how many summary lines a row draws under it.
@@ -146,7 +161,7 @@ func (h *Home) summaryLineCount(item session.Item) int {
 	if item.Type != session.ItemTypeSession || item.Session == nil || !h.summaryShowsLines(item.Session) {
 		return 0
 	}
-	return len(h.sessionSummaryFor(item.Session, h.getSessionRenderState(item.Session)).lines())
+	return len(h.shownSummaryLines(h.sessionSummaryFor(item.Session, h.getSessionRenderState(item.Session))))
 }
 
 // summaryMutedColor picks one of two muted label colours for the active

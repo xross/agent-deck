@@ -771,6 +771,12 @@ type Home struct {
 	// summary: plan or todo, prompt and current activity (summary_lines.go).
 	// Default false. Loaded from config.Display.SummaryLines.
 	summaryLines bool
+	// viewOnly is agent-deck --view-only: list only, read-only keys
+	// (view_only.go). viewOnlyRecent is how far back a group's sessions may
+	// have been active for the board to open it.
+	viewOnly       bool
+	viewOnlyRecent time.Duration
+
 	// summaryCollapsed and summaryExpanded hold the sessions the user folded
 	// or opened (left folds, right opens; summary_lines.go). Any other
 	// session created after summaryFoldNewAfter starts folded.
@@ -2733,6 +2739,10 @@ func (h *Home) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 							}
 						}
 					}
+				}
+				// A status board opens the recently active groups (view_only.go).
+				if h.viewOnly {
+					h.openRecentGroups(time.Now())
 				}
 			} else {
 				// Refresh - update existing tree with loaded sessions AND groups
@@ -5424,6 +5434,9 @@ func newGlobalSearchInstance(result *GlobalSearchResult, group string) *session.
 
 // handleMouse handles mouse events (click to select, double-click to activate)
 func (h *Home) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if !h.viewOnlyAllowsMouse(msg) {
+		return h, nil
+	}
 	if h.hasModalVisible() {
 		// A modal opening mid-drag shouldn't leave the divider stuck grabbed.
 		// Treat it as a release so the dragged-to ratio is preserved.
@@ -5562,7 +5575,7 @@ func (h *Home) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	raw := msg.String()
 	key := h.normalizeMainKey(raw)
 	uiLog.Info("keypress", "raw", raw, "normalized", key, "type", msg.Type, "runes", string(msg.Runes))
-	if key == "" {
+	if key == "" || !h.viewOnlyAllows(key) {
 		return h, nil
 	}
 
@@ -8900,7 +8913,7 @@ func (h *Home) renderSessionItem(
 	// title) whether its summary lines are open or folded; without it the
 	// summary itself is the suffix (summary_lines.go).
 	segs := summary.singleLine()
-	if h.summaryLines {
+	if h.summaryLines || h.viewOnly {
 		segs = nil
 		if pane := originalPaneSubtitle(instState); pane != "" {
 			segs = []summarySeg{{text: pane}}
@@ -8929,7 +8942,7 @@ func (h *Home) renderSessionItem(
 		}
 		indent := strings.Repeat(" ", leftGutterWidth) + contBaseIndent + " " + treeCont +
 			strings.Repeat(" ", cellWidth(windowChevron)+cellWidth(status)+1)
-		lines := summary.lines()
+		lines := h.shownSummaryLines(summary)
 		for i, line := range lines {
 			joint := "│ "
 			if i == len(lines)-1 {

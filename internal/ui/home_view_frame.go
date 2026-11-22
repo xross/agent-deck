@@ -22,6 +22,9 @@ import (
 // user can opt into the stacked (PREVIEW-below) layout via
 // preview_orientation = "below"; narrow terminals always stack.
 func (h *Home) getLayoutMode() string {
+	if h.viewOnly {
+		return LayoutModeSingle // the list alone, full width
+	}
 	if h.embeddedMode {
 		if h.width < layoutBreakpointStacked {
 			return LayoutModeStacked
@@ -1764,6 +1767,9 @@ func (h *Home) renderEmbeddedOnlyLayout(contentHeight int) string {
 // The very-narrow tiny tier is always used below layoutBreakpointSingle so the
 // bar never overflows, whatever the configured style.
 func (h *Home) renderHelpBar() string {
+	if h.viewOnly {
+		return h.renderViewOnlyHelpBar()
+	}
 	if h.width < layoutBreakpointSingle {
 		return h.renderHelpBarTiny()
 	}

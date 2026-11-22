@@ -368,7 +368,7 @@ func (h *Home) adoptOwnWrite(stamps statedb.WriteStamps, what string) bool {
 // saveGroupState saves only group expanded/collapsed state to SQLite.
 // This is lightweight (no Touch, no StorageWatcher trigger) and safe to call after every toggle.
 func (h *Home) saveGroupState() {
-	if h.storage == nil || h.groupTree == nil {
+	if h.storage == nil || h.groupTree == nil || h.viewOnly {
 		return
 	}
 	groupTreeCopy := h.groupTree.ShallowCopyForSave()
@@ -393,7 +393,7 @@ func (h *Home) saveUIState() {
 // DB is not a failure: that is the headless/no-persistence configuration, not a
 // write that went wrong.
 func (h *Home) saveUIStateErr() error {
-	if h.storage == nil {
+	if h.storage == nil || h.viewOnly {
 		return nil
 	}
 	db := h.storage.GetDB()

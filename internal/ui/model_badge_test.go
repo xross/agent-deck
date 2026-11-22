@@ -379,3 +379,71 @@ func TestSessionSummary_RowKeepsPaneTitle(t *testing.T) {
 		t.Fatalf("folded: want only the row with its pane title, got %q", lines)
 	}
 }
+
+// View-only mode shows the list alone and lets only moving, folding,
+// filtering and quitting keys through.
+func TestViewOnly(t *testing.T) {
+	h := &Home{width: 200, viewOnly: true}
+	if got := h.getLayoutMode(); got != LayoutModeSingle {
+		t.Fatalf("layout = %q, want the list alone", got)
+	}
+	for _, key := range []string{"down", "left", "right", "q", "%"} {
+		if !h.viewOnlyAllows(key) {
+			t.Errorf("view-only must allow %q", key)
+		}
+	}
+	for _, key := range []string{"enter", "n", "d", "x", "e", "r", "M", "/", "S"} {
+		if h.viewOnlyAllows(key) {
+			t.Errorf("view-only must block %q", key)
+		}
+	}
+	h.summaryCollapsed = map[string]bool{"a": true}
+	h.SetViewOnly(true, DefaultViewOnlyRecent)
+	if len(h.summaryCollapsed) != 0 || !h.summaryFoldNewAfter.IsZero() {
+		t.Error("the board must start with every summary open")
+	}
+	if err := h.saveUIStateErr(); err != nil {
+		t.Errorf("view-only must not save UI state, got %v", err)
+	}
+	h.viewOnly = false
+	if !h.viewOnlyAllows("enter") {
+		t.Error("outside view-only every key is allowed")
+	}
+}
+
+// The board shows one line per idle session and a single doing line under a
+// running one, with no pane title or prompt.
+func TestViewOnly_BoardLines(t *testing.T) {
+	inst := &session.Instance{ID: "cl", Title: "General", Tool: "claude"}
+	h := &Home{width: 120, viewOnly: true,
+		liveActivities: map[string]string{"cl": "bash: go test ./..."},
+		liveReplies:    map[string]string{"cl": "Both changes are in."},
+	}
+	idle := sessionRenderState{status: session.StatusIdle, tool: "claude", title: "General", paneTitle: "General task", latestPrompt: "fix the build"}
+	if row := summaryRow(t, h, inst, idle); strings.Count(row, "\n") != 1 || strings.Contains(row, "prompt:") || strings.Contains(row, "General task") {
+		t.Fatalf("an idle session must be one plain line on the board, got %q", row)
+	}
+	running := idle
+	running.status = session.StatusRunning
+	lines := strings.Split(strings.TrimSuffix(summaryRow(t, h, inst, running), "\n"), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[1], "╰ doing: bash: go test ./...") {
+		t.Fatalf("a running session must show only its doing line, got %q", lines)
+	}
+}
+
+// The board opens only groups with a session active within its window,
+// counting subgroups, so a parent opens with a busy child.
+func TestViewOnly_OpenRecentGroups(t *testing.T) {
+	now := time.Now()
+	recent := &session.Instance{ID: "r", GroupPath: "work/busy", CreatedAt: now.Add(-72 * time.Hour), LastAccessedAt: now.Add(-time.Hour)}
+	old := &session.Instance{ID: "o", GroupPath: "archive", CreatedAt: now.Add(-30 * 24 * time.Hour)}
+	idle := &session.Instance{ID: "i", GroupPath: "work/quiet", CreatedAt: now.Add(-10 * 24 * time.Hour)}
+	h := &Home{groupTree: session.NewGroupTree([]*session.Instance{recent, old, idle})}
+	h.SetViewOnly(true, DefaultViewOnlyRecent)
+	h.openRecentGroups(now)
+	for path, want := range map[string]bool{"work": true, "work/busy": true, "work/quiet": false, "archive": false} {
+		if got := h.groupTree.Groups[path].Expanded; got != want {
+			t.Errorf("group %q open = %v, want %v", path, got, want)
+		}
+	}
+}

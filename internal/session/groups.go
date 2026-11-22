@@ -515,10 +515,10 @@ func (r groupRank) before(o groupRank) bool {
 	return r.accessed.After(o.accessed)
 }
 
-// sessionLastActive is when a session last did anything or was last opened:
+// LastActiveAt is when a session last did anything or was last opened:
 // the later of its recorded agent activity and its last use from the deck,
 // falling back to when it was created.
-func sessionLastActive(inst *Instance) time.Time {
+func LastActiveAt(inst *Instance) time.Time {
 	latest := inst.CreatedAt
 	for _, ts := range []time.Time{inst.LastActivityAt(), inst.GetLastAccessedAtThreadSafe()} {
 		if ts.After(latest) {
@@ -539,7 +539,7 @@ func (t *GroupTree) groupRanks(mode string) map[string]groupRank {
 		for _, inst := range g.Sessions {
 			r := groupRank{priority: actionablePriority(inst.Status), accessed: inst.GetLastAccessedAtThreadSafe()}
 			if mode == "recent" {
-				r = groupRank{accessed: sessionLastActive(inst)}
+				r = groupRank{accessed: LastActiveAt(inst)}
 			}
 			for p := path; ; p = getParentPath(p) {
 				if cur, ok := ranks[p]; ok && r.before(cur) {
