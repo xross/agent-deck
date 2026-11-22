@@ -4022,6 +4022,9 @@ func (h *Home) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case triggersTickMsg, triggersPolledMsg:
 		return h, h.handleTriggersMsg(msg)
 
+	case windowTitleTickMsg:
+		return h, windowTitleCmd()
+
 	case modelBadgeTickMsg, modelBadgePolledMsg:
 		return h, h.handleModelBadgeMsg(msg)
 

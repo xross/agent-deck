@@ -4520,6 +4520,13 @@ type DisplaySettings struct {
 	// Example: "{group}/{name}" or "[{project}] {group} · {name}".
 	TitleFormat string `toml:"title_format,omitempty"`
 
+	// DashboardTitle is the terminal window/tab title the agent-deck TUI sets
+	// for itself while its session list is on screen, e.g. "AD | agent-deck",
+	// so a window running agent-deck is easy to pick out. Set again on every
+	// return from an attached session, whose own title follows TitleFormat.
+	// Empty (the default) leaves the terminal's title alone.
+	DashboardTitle string `toml:"dashboard_title,omitempty"`
+
 	// ShowSessionTimestamps appends a dim "Nm ago" badge to every session row.
 	// Default: false — opt-in to avoid crowding existing badges. See
 	// renderSessionItem for the timestamp source.
