@@ -4140,6 +4140,10 @@ func (h *Home) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return h, nil
 
+	case notesEditorDoneMsg:
+		h.applyNotesFromEditor(msg)
+		return h, nil
+
 	case promptEditorMsg:
 		if msg.err != nil {
 			h.setError(fmt.Errorf("edit message: %w", msg.err))
@@ -7071,6 +7075,9 @@ func (h *Home) handleMainKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if h.cursor < len(h.flatItems) {
 			item := h.flatItems[h.cursor]
 			if item.Type == session.ItemTypeSession && item.Session != nil {
+				if editor := notesEditorCommand(); editor != "" {
+					return h, editNotesInEditor(editor, item.Session.ID, item.Session.Notes)
+				}
 				h.beginNotesEditing(item.Session)
 			} else {
 				h.explainKeyNeedsSession("edit notes")

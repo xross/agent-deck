@@ -2018,6 +2018,12 @@ type PreviewSettings struct {
 	// in the preview pane when output is visible.
 	// Range: 0.1 - 0.9 (fraction reserved for notes). Default: 0.33
 	NotesOutputSplit float64 `toml:"notes_output_split,omitzero"`
+
+	// NotesEditor is the command the notes key (e) opens a session's notes
+	// in, e.g. "vim" or "nvim"; it gets the path of a file holding the notes,
+	// and what the file holds when it exits becomes the notes. Empty (the
+	// default) keeps the built-in text box.
+	NotesEditor string `toml:"notes_editor,omitempty"`
 }
 
 // AnalyticsDisplaySettings configures which analytics sections to display
