@@ -32,6 +32,7 @@ import (
 	"github.com/asheshgoplani/agent-deck/internal/menudata"
 	"github.com/asheshgoplani/agent-deck/internal/optiming"
 	"github.com/asheshgoplani/agent-deck/internal/provider"
+	"github.com/asheshgoplani/agent-deck/internal/quota"
 	"github.com/asheshgoplani/agent-deck/internal/reportloop"
 	"github.com/asheshgoplani/agent-deck/internal/safego"
 	"github.com/asheshgoplani/agent-deck/internal/session"
@@ -771,6 +772,10 @@ type Home struct {
 	// summary: plan or todo, prompt and current activity (summary_lines.go).
 	// Default false. Loaded from config.Display.SummaryLines.
 	summaryLines bool
+	// claudeUsage is the last Claude plan usage snapshot read for the header
+	// (claude_usage.go); nil until one is read.
+	claudeUsage *quota.Snapshot
+
 	// viewOnly is agent-deck --view-only: list only, read-only keys
 	// (view_only.go). viewOnlyRecent is how far back a group's sessions may
 	// have been active for the board to open it.
@@ -4034,6 +4039,13 @@ func (h *Home) updateInner(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case windowTitleTickMsg:
 		return h, windowTitleCmd()
+
+	case claudeUsageTickMsg:
+		return h, h.claudeUsagePollCmd()
+
+	case claudeUsageLoadedMsg:
+		h.claudeUsage = msg.snapshot
+		return h, nil
 
 	case modelBadgeTickMsg, modelBadgePolledMsg:
 		return h, h.handleModelBadgeMsg(msg)

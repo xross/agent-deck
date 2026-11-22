@@ -810,16 +810,14 @@ func (h *Home) renderFrame() string {
 	// System stats segment (CPU, RAM, etc.) — shown when [ui.header].fields
 	// requests any of load/memory/disk; the existing [system_stats] config
 	// still governs which of those sysinfo.Format actually renders.
-	var sysStatsSegment string
-	headerWantsHostStats := headerFieldSet[session.PreviewFieldLoad] || headerFieldSet[session.PreviewFieldMemory] || headerFieldSet[session.PreviewFieldDisk]
 	// Hidden until a session exists (ASK-211): on the welcome they are
 	// numbers a new user has no use for yet.
 	welcome := h.welcomeActive()
-	if headerWantsHostStats && h.sysStatsCollector != nil && !welcome {
-		sysStats := headerSysStatsSnapshot(h.sysStatsCollector)
-		if formatted := sysinfo.Format(sysStats, h.sysStatsConfig.GetFormat(), h.sysStatsConfig.GetShow()); formatted != "" {
-			sysStatsSegment = lipgloss.NewStyle().Foreground(ColorComment).Render(formatted)
-		}
+	// With host_stats_line the host stats have a line of their own under
+	// the header, so a narrow header no longer drops them (claude_usage.go).
+	var sysStatsSegment string
+	if !hostStatsOnOwnLine() {
+		sysStatsSegment = h.hostStatsSegment(headerFieldSet)
 	}
 
 	// Accounts segment: named Claude account slots on this host with their
@@ -910,6 +908,14 @@ func (h *Home) renderFrame() string {
 	b.WriteString(h.renderFilterBar())
 	b.WriteString("\n")
 
+	// Host stats and Claude plan usage on lines of their own under the
+	// filter bar (claude_usage.go); their height is counted with the sandbox
+	// status lines.
+	for _, line := range h.headerExtraLines(time.Now()) {
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+
 	// ═══════════════════════════════════════════════════════════════════
 	// UPDATE BANNER (if update available)
 	// ═══════════════════════════════════════════════════════════════════
@@ -948,7 +954,7 @@ func (h *Home) renderFrame() string {
 	// below the help bar is auto-dismissed after 5 s.
 	// ═══════════════════════════════════════════════════════════════════
 	sandboxStatusLines := h.sandboxStatusLines(time.Now())
-	sandboxStatusHeight := len(sandboxStatusLines)
+	sandboxStatusHeight := len(sandboxStatusLines) + h.claudeUsageLineHeight()
 	for _, line := range sandboxStatusLines {
 		b.WriteString(line)
 		b.WriteString("\n")

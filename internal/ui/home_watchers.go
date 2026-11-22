@@ -49,9 +49,10 @@ func (h *Home) Init() tea.Cmd {
 
 		h.tick(),
 		h.reviverTick(),
-		h.triggersPollCmd(),   // ⚡ badges and the Triggers panel (triggers_live.go)
-		h.modelBadgePollCmd(), // model row badges (model_badge.go)
-		windowTitleCmd(),      // [display] dashboard_title (window_title.go)
+		h.triggersPollCmd(),    // ⚡ badges and the Triggers panel (triggers_live.go)
+		h.modelBadgePollCmd(),  // model row badges (model_badge.go)
+		windowTitleCmd(),       // [display] dashboard_title (window_title.go)
+		h.claudeUsagePollCmd(), // [display] show_claude_usage (claude_usage.go)
 		h.fetchRemoteSessions,
 		h.waitRemoteChange,
 		// Opt-in telemetry upload check, now and hourly. MaybeUpload re-reads

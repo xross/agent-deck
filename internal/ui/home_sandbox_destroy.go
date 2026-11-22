@@ -129,8 +129,10 @@ func (h *Home) sandboxStatusLines(now time.Time) []string {
 }
 
 // sandboxStatusHeight is how many rows the sandbox status lines take.
+// It includes the Claude usage line under the header (claude_usage.go), so
+// every layout and mouse calculation that reserves these rows reserves it too.
 func (h *Home) sandboxStatusHeight() int {
-	return len(h.sandboxStatusLines(time.Now()))
+	return len(h.sandboxStatusLines(time.Now())) + h.claudeUsageLineHeight()
 }
 
 // destroyRunning reports whether a destroy of remoteName is still running

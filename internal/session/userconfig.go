@@ -4533,6 +4533,17 @@ type DisplaySettings struct {
 	// differs: "● 1 (2) running". Valid values: true, false. Default: false.
 	HeaderCountsVisible bool `toml:"header_counts_visible,omitempty"`
 
+	// ShowClaudeUsage adds Claude's plan usage to the header, e.g.
+	// "Claude 5h 3% · 7d 8%", from the cache `agent-deck usage` reads (fed by
+	// Claude's statusLine). Valid values: true, false. Default: false.
+	ShowClaudeUsage bool `toml:"show_claude_usage,omitempty"`
+
+	// HostStatsLine puts the host stats (CPU, memory, disk, network; see
+	// [system_stats]) on a line of their own under the header, where a
+	// narrow window cannot squeeze them out, instead of at the end of the
+	// header. Valid values: true, false. Default: false.
+	HostStatsLine bool `toml:"host_stats_line,omitempty"`
+
 	// ShowSessionTimestamps appends a dim "Nm ago" badge to every session row.
 	// Default: false — opt-in to avoid crowding existing badges. See
 	// renderSessionItem for the timestamp source.

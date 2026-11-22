@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/asheshgoplani/agent-deck/internal/quota"
 	"github.com/asheshgoplani/agent-deck/internal/session"
 )
 
@@ -500,5 +501,26 @@ func TestDarkenTowardBg(t *testing.T) {
 	}
 	if got := darkenTowardBg(lipgloss.Color("3"), 0.5); got != "3" {
 		t.Fatalf("an ANSI colour must come back unchanged, got %q", got)
+	}
+}
+
+func TestClaudeUsageLine(t *testing.T) {
+	now := time.Now()
+	future := now.Add(90 * time.Minute).Unix()
+	past := now.Add(-time.Hour).Unix()
+	h := &Home{width: 200}
+	if h.claudeUsageLine(now) != "" || h.claudeUsageLineHeight() != 0 {
+		t.Fatal("no snapshot must give no line")
+	}
+	h.claudeUsage = &quota.Snapshot{ID: quota.ProviderClaude, UpdatedAt: now.Unix(), Windows: []quota.Window{
+		{Kind: quota.WindowFiveHour, Label: "5h", UsedPercentage: 3, ResetsAt: &future},
+		{Kind: quota.WindowSevenDay, Label: "7d", UsedPercentage: 85, ResetsAt: &past},
+	}}
+	got := stripAnsi(h.claudeUsageLine(now))
+	if !strings.Contains(got, "Claude  5h 3% used · resets in 1h") || !strings.Contains(got, "7d –") {
+		t.Fatalf("line = %q", got)
+	}
+	if h.claudeUsageLineHeight() != 1 {
+		t.Fatal("a shown line must take one row")
 	}
 }
