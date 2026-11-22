@@ -36,16 +36,16 @@ func TestShortModelLabel(t *testing.T) {
 
 func TestFitModelBadge(t *testing.T) {
 	forceTrueColorProfile()
-	if text, width := fitModelBadge("", false, -1); text != "" || width != 0 {
+	if text, width := fitModelBadge("", -1); text != "" || width != 0 {
 		t.Errorf("empty label must render nothing, got %q (%d)", text, width)
 	}
-	if text, width := fitModelBadge("opus 5.5", false, -1); !strings.Contains(text, " [opus 5.5]") || width != 11 {
+	if text, width := fitModelBadge("opus 5.5", -1); !strings.Contains(text, " [opus 5.5]") || width != 11 {
 		t.Errorf("unbounded badge = %q (%d), want \" [opus 5.5]\" at 11 cells", text, width)
 	}
-	if text, width := fitModelBadge("opus 5.5", false, 11); text == "" || width != 11 {
+	if text, width := fitModelBadge("opus 5.5", 11); text == "" || width != 11 {
 		t.Errorf("badge must fit an exact budget, got %q (%d)", text, width)
 	}
-	if text, width := fitModelBadge("opus 5.5", false, 10); text != "" || width != 0 {
+	if text, width := fitModelBadge("opus 5.5", 10); text != "" || width != 0 {
 		t.Errorf("badge over budget must be dropped whole, got %q (%d)", text, width)
 	}
 }

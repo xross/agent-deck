@@ -8535,9 +8535,9 @@ func (h *Home) renderSessionItem(
 	if selected {
 		selectionPrefix = SessionSelectionPrefix.Render("▶")
 		titleStyle = SessionTitleSelStyle
-		toolStyle = SessionStatusSelStyle
-		statusStyle = SessionStatusSelStyle
-		status = statusStyle.Render(statusIcon)
+		// The status glyph, the tool badge and the model badge keep their own
+		// colours on a selected row: the selection bar's colours would hide
+		// the session's state and which agent and model it runs.
 		// Tree connector also gets selection styling
 		treeStyle = TreeConnectorSelStyle
 		// Rebuild baseIndent with selection arrow for sub-sessions
@@ -8784,7 +8784,7 @@ func (h *Home) renderSessionItem(
 	}
 	modelBadgeText, modelWidth := "", 0
 	if listWidth <= 0 || listWidth >= 40 {
-		modelBadgeText, modelWidth = fitModelBadge(h.sessionModelLabel(inst), selected, modelBudget)
+		modelBadgeText, modelWidth = fitModelBadge(h.sessionModelLabel(inst), modelBudget)
 	}
 	accountBudget := instState.accountDisplay.width
 	if badgeBudget >= 0 {

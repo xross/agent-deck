@@ -228,8 +228,9 @@ func isDigits(s string) bool {
 // fitModelBadge renders the "[model]" row badge within budget cells
 // (negative means unbounded). It is dropped whole when it does not fit, so
 // the title keeps its floor (#2201). Purple sets it apart from the tool
-// badge's brand colour and the cyan of the worktree and sandbox badges.
-func fitModelBadge(label string, selected bool, budget int) (string, int) {
+// badge's brand colour and the cyan of the worktree and sandbox badges; like
+// the tool badge it keeps its colour on a selected row.
+func fitModelBadge(label string, budget int) (string, int) {
 	if label == "" {
 		return "", 0
 	}
@@ -238,9 +239,5 @@ func fitModelBadge(label string, selected bool, budget int) (string, int) {
 	if budget >= 0 && width > budget {
 		return "", 0
 	}
-	style := lipgloss.NewStyle().Foreground(ColorPurple)
-	if selected {
-		style = SessionStatusSelStyle
-	}
-	return style.Render(badge), width
+	return lipgloss.NewStyle().Foreground(ColorPurple).Render(badge), width
 }
