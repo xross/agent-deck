@@ -438,9 +438,7 @@ func renderEmbeddedTerminal(title, status, tool, preview string, width, height, 
 	for i, line := range lines {
 		line = stripControlCharsPreserveANSI(line)
 		line = stripDisplayErasingEscapes(line)
-		if GetCurrentTheme() == ThemeLight {
-			line = remapANSIBackground(line, previewSurfaceANSI())
-		}
+		line = remapPreviewBackground(line, tool)
 		if cellWidth(line) > contentWidth {
 			line = cellTruncate(line, max(1, contentWidth-1), "…")
 		}

@@ -1918,7 +1918,6 @@ func (h *Home) renderPreviewPane(width, height int) string {
 		consecutiveEmpty := 0
 		const maxConsecutiveEmpty = 2 // Allow up to 2 consecutive empty lines
 
-		isLightTheme := GetCurrentTheme() == ThemeLight
 		for _, line := range lines {
 			// Strip dangerous control characters (\r, \b, etc.) but preserve
 			// ANSI escape sequences (ESC = 0x1b) so colors and formatting
@@ -1935,9 +1934,9 @@ func (h *Home) renderPreviewPane(width, height int) string {
 			// the current preview surface instead of stripping them. Dark
 			// bands (e.g. Codex, #322) stop bleeding through, and light
 			// backgrounds a tool already draws pass through unchanged (#2449).
-			if isLightTheme {
-				safeLine = remapANSIBackground(safeLine, previewSurfaceANSI())
-			}
+			// OpenCode's own near-black is dropped in dark theme too, see
+			// previewBackgroundReplacement.
+			safeLine = remapPreviewBackground(safeLine, selected.Tool)
 
 			// Check if visually empty (strip ANSI for this check)
 			stripped := ansi.Strip(safeLine)

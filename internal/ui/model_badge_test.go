@@ -524,3 +524,20 @@ func TestClaudeUsageLine(t *testing.T) {
 		t.Fatal("a shown line must take one row")
 	}
 }
+
+// OpenCode's dark backgrounds are dropped from the preview in dark theme;
+// other tools' are kept, and light backgrounds always pass through.
+func TestRemapPreviewBackground_DarkTheme(t *testing.T) {
+	InitTheme("dark")
+	dark := "\x1b[48;2;10;10;10mtext"
+	light := "\x1b[48;2;230;230;230mtext"
+	if got := remapPreviewBackground(dark, "opencode"); got != defaultBackgroundANSI+"text" {
+		t.Errorf("opencode dark background = %q, want it reset to the terminal's", got)
+	}
+	if got := remapPreviewBackground(light, "opencode"); got != light {
+		t.Errorf("opencode light background = %q, want it unchanged", got)
+	}
+	if got := remapPreviewBackground(dark, "claude"); got != dark {
+		t.Errorf("claude dark background = %q, want it unchanged in dark theme", got)
+	}
+}
