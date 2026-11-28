@@ -688,11 +688,15 @@ func (g *GroupDialog) View() string {
 	}
 
 	// Content line of the Default Path row (for anchoring the suggestion
-	// dropdown overlay): title + blank, then the optional toggle tabs block
-	// (2 lines) and parent info block (2 lines), then the Name row.
+	// dropdown overlay): title + blank, then the optional toggle tabs block,
+	// remote info block and parent info block (2 lines each), then the Name
+	// row.
 	g.pathDropdownLineOffset = 2
 	if g.mode == GroupDialogCreate {
 		if g.CanToggle() {
+			g.pathDropdownLineOffset += 2
+		}
+		if g.remoteName != "" {
 			g.pathDropdownLineOffset += 2
 		}
 		if g.parentName != "" {
@@ -756,9 +760,15 @@ func (g *GroupDialog) View() string {
 		// Rows: border (1) + vertical padding (1) + content offset. Columns:
 		// measure the rendered row's own leading spaces so JoinVertical's
 		// centering can never skew the anchor.
-		overlayRow := topRow + 1 + 1 + g.pathDropdownLineOffset
+		pathRow := topRow + 1 + 1 + g.pathDropdownLineOffset
+		// Open the menu under the Default Path row, never over it, so what is
+		// typed stays visible; above the row when there is no room below.
+		overlayRow := pathRow + 1
+		if menuHeight := lipgloss.Height(suggestionsOverlay); g.height > 0 && overlayRow+menuHeight > g.height {
+			overlayRow = max(0, pathRow-menuHeight)
+		}
 		dialogLines := strings.Split(dialog, "\n")
-		lineIdx := overlayRow - topRow
+		lineIdx := pathRow - topRow
 		leading := 0
 		if lineIdx >= 0 && lineIdx < len(dialogLines) {
 			leading = leadingVisibleSpaces(stripAnsi(dialogLines[lineIdx]))
